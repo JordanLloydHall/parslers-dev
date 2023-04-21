@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::{collections::{HashSet, BinaryHeap}};
+use std::collections::{BinaryHeap, HashSet};
 
 enum Expr {
     Add(Box<Expr>, Box<Expr>),

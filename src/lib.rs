@@ -1,52 +1,82 @@
-#![feature(box_patterns)]
+#![feature(specialization)]
 
-// enum Parsler<A, B> {
-//     Pure(Pure<A>),
-//     Ap(Ap<A, B>),
-// }
-
-// impl<A> Parsler<A> {
-//     fn parse<'a>(&self, input: &'a str) -> Result<(A, &'a str), String> {
-
-//     }
-// }
-
+#[derive(Debug)]
 struct Pure<A>(A);
 
 fn pure<A>(a: A) -> Pure<A> {
     Pure(a)
 }
 
-struct Ap<B, F: Fn(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>>(P1, P2);
+struct Ap<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>>(P1, P2);
 
 struct Map<B, P1: Parsler, F: Fn(P1::Output) -> B + Clone>(Ap<B, F, P1, Pure<F>>);
 
-struct Then<P1: Parsler, P2: Parsler>(Ap<P2::Output, fn(P2::Output) -> P2::Output, P2, Map<fn(P2::Output) -> P2::Output, P1, fn(P1::Output) -> fn(P2::Output) -> P2::Output>>);
+struct Then<P1: Parsler, P2: Parsler>(
+    Ap<
+        P2::Output,
+        fn(P2::Output) -> P2::Output,
+        P2,
+        Map<fn(P2::Output) -> P2::Output, P1, fn(P1::Output) -> fn(P2::Output) -> P2::Output>,
+    >,
+);
 
-
-trait Parsler: Sized {
+trait Parsler {
     type Output;
 
     fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String>;
 
-    fn ap<B, F: Fn(Self::Output) -> B, P1: Parsler<Output = F>>(self, p1: P1) -> Ap<B, F, Self, P1> {
+    fn ap<B, F: FnOnce(Self::Output) -> B, P1: Parsler<Output = F>>(
+        self,
+        p1: P1,
+    )  -> Ap<B, F, Self, P1> where Self: Sized {
         Ap(self, p1)
     }
 
-    fn map<B, F: Fn(Self::Output) -> B + Clone>(self, f: F) -> Map<B, Self, F> {
+    fn map<B, F: Fn(Self::Output) -> B + Clone>(self, f: F) -> Map<B, Self, F> where Self: Sized  {
         Map(self.ap(Pure(f)))
     }
-    
-    fn then<B, P1: Parsler<Output = B>>(self, p1: P1) -> Then<Self, P1> {
+
+    fn then<B, P1: Parsler<Output = B>>(self, p1: P1) -> Then<Self, P1> where Self: Sized  {
         Then(p1.ap(self.map(|_| |a| a)))
     }
-
 }
 
 
 
+trait Opt {
+    type Optimised;
+    fn opt(self) -> Self::Optimised;
+}
 
-impl<B, F: Fn(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Parsler for Ap<B, F, P1, P2> {
+// default impl<T> Opt for T {
+//     default type Optimised = Self;
+//     fn opt(self) -> Self::Optimised {
+//         self
+//     }
+// }
+
+impl<A: Clone, B, F: FnOnce(A) -> B + Clone> Opt for Ap<B, F, Pure<A>, Pure<F>> {
+    type Optimised = Pure<B>;
+    fn opt(self) -> Self::Optimised {
+        Pure(self.1.0(self.0.0))
+    }
+}
+
+// default impl <B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Opt for Ap<B, F, P1, P2> {
+//     type Optimised = Ap<B, F, P1, P2>;
+//     fn opt(self) -> Self::Optimised {
+//         Ap(self.0, self.1)
+//     }
+// }
+
+default impl <B, F: FnOnce(P1::Output) -> B, P1: Parsler + Opt, P2: Parsler<Output = F> + Opt> Opt for Ap<B, F, P1, P2> {
+    type Optimised = Ap<B, F, P1, P2>;
+    fn opt(self) -> Self::Optimised {
+        Ap(self.0, self.1)
+    }
+}
+
+impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Parsler for Ap<B, F, P1, P2> {
     type Output = B;
     fn parse<'a>(&self, input: &'a str) -> Result<(B, &'a str), String> {
         let (f, input) = self.1.parse(input)?;
@@ -55,12 +85,78 @@ impl<B, F: Fn(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Parsler fo
     }
 }
 
-// struct Map<B, P1: Parsler, F: Fn(P1::Output) -> B>(P1, F);
-
 impl<B, P1: Parsler, F: Fn(P1::Output) -> B + Clone> Parsler for Map<B, P1, F> {
     type Output = B;
     fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
         self.0.parse(input)
+    }
+}
+
+struct Satisfy<F: Fn(char) -> bool>(F);
+
+impl<F: Fn(char) -> bool> Parsler for Satisfy<F> {
+    type Output = char;
+    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
+        input
+            .chars()
+            .next()
+            .ok_or_else(|| "Unexpected end of input".to_string())
+            .and_then(|c| {
+                if self.0(c) {
+                    Ok((c, &input[1..]))
+                } else {
+                    Err(format!("Unexpected character: {}", c))
+                }
+            })
+    }
+}
+
+impl<A> Parsler for Box<dyn Parsler<Output = A>> {
+    type Output = A;
+    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
+        self.as_ref().parse(input)
+    }
+}
+
+// struct Sequence<A>(Vec<Box<dyn Parsler<Output = A>>>);
+
+fn sequence<A: Clone + 'static>(parsers: Vec<Box<dyn Parsler<Output = A>>>) -> impl Parsler<Output = Vec<A>> {
+    parsers.into_iter().fold(Box::new(pure(vec![])) as Box<dyn Parsler<Output = Vec<A>>>, |acc: Box<dyn Parsler<Output = Vec<A>>>, p: Box<dyn Parsler<Output = A>>| {
+        Box::new(p.ap(acc.map(|mut v: Vec<A>| |a: A| {v.push(a); v}))) as Box<dyn Parsler<Output = Vec<A>>>
+    })
+}
+
+// impl<A> Parsler for Sequence<A> {
+//     type Output = Vec<A>;
+//     fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
+//         self.0.iter().try_fold(vec![], |acc, p| {
+//             let (a, input) = p.parse(input)?;
+//             Ok((acc, a, input))
+//         })
+//     }
+// }
+
+struct LookAhead<P: Parsler>(P);
+
+impl<P: Parsler> Parsler for LookAhead<P> {
+    type Output = P::Output;
+    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
+        self.0.parse(input).map(|(output, _)| (output, input))
+    }
+}
+
+const fn item() -> Satisfy<impl Fn(char) -> bool> {
+    Satisfy(|_| true)
+}
+
+const fn char(c: char) -> Satisfy<impl Fn(char) -> bool> {
+    Satisfy(move |c2| c == c2)
+}
+
+impl Parsler for char {
+    type Output = char;
+    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
+        char(*self).parse(input)
     }
 }
 
@@ -70,7 +166,6 @@ impl<P1: Parsler, P2: Parsler> Parsler for Then<P1, P2> {
         self.0.parse(input)
     }
 }
-
 
 impl<A: Clone> Parsler for Pure<A> {
     type Output = A;
@@ -86,25 +181,24 @@ impl<A: Clone> Parsler for Pure<A> {
 
 // impl<A> Parsler<A> {
 //     fn parse<E>(&self, input: &str) -> Result<A, E> {
-//         todo!()   
+//         todo!()
 //     }
 
 //     fn map<B, F: Fn(A) -> B>(self, px: Parsler<F>) -> Parsler<B> {
-        
+
 //     }
 
 //     fn pure<B>(b: B) -> Parsler<B> {
 //         Parsler::Pure(b)
 //     }
 
-    
 // }
 
 // fn ap<A, B, F: Fn() -> Parsler<B>, P: Fn(A) -> B>(p: Parsler<P>, px: F) -> Parsler<B> {
 //     todo!()
 // }
 
-// impl<A, I, B> Parsler<A> 
+// impl<A, I, B> Parsler<A>
 // where
 //     A: Fn(I) -> B {
 
@@ -112,8 +206,6 @@ impl<A: Clone> Parsler for Pure<A> {
 //         todo!()
 //     }
 // }
-
-
 
 // trait Parsler<A> {
 //     type Choice<A>: Parsler<A>;
@@ -128,9 +220,6 @@ impl<A: Clone> Parsler for Pure<A> {
 //     type Decide<A>: Parsler<A>;
 //     type Decade<A>: Parsler<A>;
 // }
-
-
-
 
 // impl Combinator {
 //     fn optimise(self) -> Combinator {
@@ -164,16 +253,32 @@ impl<A: Clone> Parsler for Pure<A> {
 //     }
 // }
 
-
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn test_structure() {
-        dbg!(pure('a').then(pure('b')).map(|x| (x as u32 as u8 + 2) as char).parse(""));
+        dbg!(pure('a')
+            .then(pure('b'))
+            .map(|x| (x as u32 as u8 + 2) as char)
+            .parse(""));
+
+        dbg!(char('a')
+            .parse("a"));
+
+        dbg!(sequence(vec![Box::new('a'), Box::new('b'), Box::new('c')]).parse("abc"));
+
+        // dbg!(pure('a').ap(Pure(|c| (c as u32 + 1) as u8 as char)).opt());
     }
 }
+
+// trait ParserF {
+//     type K;
+//     type A;
+//     type Pure: Fn(Self::A) -> Self;
+//     type Satisfy<F, P2>: Fn (F) -> P2
+//         where
+//             P2: ParserF<K=Self::K, A=char>,
+//             F: Fn(char) -> bool;
+//     type Try: 
+// }
