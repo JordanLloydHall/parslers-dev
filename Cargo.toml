@@ -25,3 +25,4 @@ proc-macro = true
 syn = { version = "*", features = ["extra-traits"] }
 quote = "*"
 proc-macro2 = "*"
+nom = "7.1.3"

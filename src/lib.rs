@@ -1,284 +1,491 @@
-#![feature(specialization)]
+#![feature(assert_matches)]
+#![feature(box_patterns)]
+extern crate proc_macro;
 
-#[derive(Debug)]
-struct Pure<A>(A);
+use std::f32::consts::E;
 
-fn pure<A>(a: A) -> Pure<A> {
-    Pure(a)
+// use proc_macro::{TokenStream, TokenTree};
+use proc_macro2::{TokenStream, TokenTree};
+use quote::__private::ext::RepToTokensExt;
+
+// # Grammar
+// ```
+// <spec> ::= <statement>
+//             | <statement> <program>
+// <statement> ::= ( 'pub' ) ? 'let' <ident> '=' <parser> ';'
+// <parser> ::= <ident>
+//             | 'pure' '(' <pure_val> ')
+//             | 'satisfy' '(' <ident> ')'
+//             | 'try' '(' <parser> ')'
+//             | 'look' '(' <parser> ')'
+//             | 'neg_look' '(' <parser> ')'
+//             | 'ap' '(' <parser> ',' <parser> ')'
+//             | 'then' '(' <parser> ( ',' <parser> ) + ')'
+//             | 'before' '(' <parser> ( ',' <parser> ) + ')'
+//             | 'or' '(' <parser> ( ',' <parser> ) + ')'
+//             | 'empty'
+//             | 'branch' '(' <parser>, <parser>, <parser> ')'
+// <ident> ::= [a-zA-Z_][a-zA-Z0-9_]*
+// <pure_val> ::= 'func' '(' <ident> ')'
+//             | 'val' '(' <string> ')'
+// <string> ::= [^"]*
+// ```
+
+#[derive(Debug, PartialEq, Clone)]
+struct Spec {
+    statements: Vec<Statement>,
 }
 
-struct Ap<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>>(P1, P2);
-
-struct Map<B, P1: Parsler, F: Fn(P1::Output) -> B + Clone>(Ap<B, F, P1, Pure<F>>);
-
-struct Then<P1: Parsler, P2: Parsler>(
-    Ap<
-        P2::Output,
-        fn(P2::Output) -> P2::Output,
-        P2,
-        Map<fn(P2::Output) -> P2::Output, P1, fn(P1::Output) -> fn(P2::Output) -> P2::Output>,
-    >,
-);
-
-trait Parsler {
-    type Output;
-
-    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String>;
-
-    fn ap<B, F: FnOnce(Self::Output) -> B, P1: Parsler<Output = F>>(
-        self,
-        p1: P1,
-    )  -> Ap<B, F, Self, P1> where Self: Sized {
-        Ap(self, p1)
-    }
-
-    fn map<B, F: Fn(Self::Output) -> B + Clone>(self, f: F) -> Map<B, Self, F> where Self: Sized  {
-        Map(self.ap(Pure(f)))
-    }
-
-    fn then<B, P1: Parsler<Output = B>>(self, p1: P1) -> Then<Self, P1> where Self: Sized  {
-        Then(p1.ap(self.map(|_| |a| a)))
-    }
+#[derive(Debug, PartialEq, Clone)]
+struct Statement {
+    public: bool,
+    ident: String,
+    parser: Parser,
 }
 
-
-
-trait Opt {
-    type Optimised;
-    fn opt(self) -> Self::Optimised;
+#[derive(Debug, PartialEq, Clone)]
+enum Parser {
+    Ident(String),
+    Pure(PureVal),
+    Satisfy(Func),
+    Try(Box<Parser>),
+    Look(Box<Parser>),
+    NegLook(Box<Parser>),
+    Ap(Box<Parser>, Box<Parser>),
+    Then(Vec<Parser>),
+    Before(Vec<Parser>),
+    Or(Vec<Parser>),
+    Empty,
+    Branch(Box<Parser>, Box<Parser>, Box<Parser>),
 }
 
-// default impl<T> Opt for T {
-//     default type Optimised = Self;
-//     fn opt(self) -> Self::Optimised {
-//         self
-//     }
-// }
-
-impl<A: Clone, B, F: FnOnce(A) -> B + Clone> Opt for Ap<B, F, Pure<A>, Pure<F>> {
-    type Optimised = Pure<B>;
-    fn opt(self) -> Self::Optimised {
-        Pure(self.1.0(self.0.0))
-    }
+#[derive(Debug, PartialEq, Clone)]
+enum PureVal {
+    Val(String),
+    Func(Func),
 }
 
-// default impl <B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Opt for Ap<B, F, P1, P2> {
-//     type Optimised = Ap<B, F, P1, P2>;
-//     fn opt(self) -> Self::Optimised {
-//         Ap(self.0, self.1)
-//     }
-// }
-
-default impl <B, F: FnOnce(P1::Output) -> B, P1: Parsler + Opt, P2: Parsler<Output = F> + Opt> Opt for Ap<B, F, P1, P2> {
-    type Optimised = Ap<B, F, P1, P2>;
-    fn opt(self) -> Self::Optimised {
-        Ap(self.0, self.1)
-    }
+#[derive(Debug, PartialEq, Clone)]
+struct Func {
+    ident: String,
 }
 
-impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Parsler for Ap<B, F, P1, P2> {
-    type Output = B;
-    fn parse<'a>(&self, input: &'a str) -> Result<(B, &'a str), String> {
-        let (f, input) = self.1.parse(input)?;
-        let (a, input) = self.0.parse(input)?;
-        Ok((f(a), input))
-    }
+#[proc_macro]
+pub fn parser(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let spec = parser::parse_spec(input.into());
+
+    // Output the parser spec
+    println!("{:#?}", spec);
+
+    "".parse().unwrap()
 }
 
-impl<B, P1: Parsler, F: Fn(P1::Output) -> B + Clone> Parsler for Map<B, P1, F> {
-    type Output = B;
-    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
-        self.0.parse(input)
-    }
-}
-
-struct Satisfy<F: Fn(char) -> bool>(F);
-
-impl<F: Fn(char) -> bool> Parsler for Satisfy<F> {
-    type Output = char;
-    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
-        input
-            .chars()
-            .next()
-            .ok_or_else(|| "Unexpected end of input".to_string())
-            .and_then(|c| {
-                if self.0(c) {
-                    Ok((c, &input[1..]))
-                } else {
-                    Err(format!("Unexpected character: {}", c))
-                }
-            })
-    }
-}
-
-impl<A> Parsler for Box<dyn Parsler<Output = A>> {
-    type Output = A;
-    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
-        self.as_ref().parse(input)
-    }
-}
-
-// struct Sequence<A>(Vec<Box<dyn Parsler<Output = A>>>);
-
-fn sequence<A: Clone + 'static>(parsers: Vec<Box<dyn Parsler<Output = A>>>) -> impl Parsler<Output = Vec<A>> {
-    parsers.into_iter().fold(Box::new(pure(vec![])) as Box<dyn Parsler<Output = Vec<A>>>, |acc: Box<dyn Parsler<Output = Vec<A>>>, p: Box<dyn Parsler<Output = A>>| {
-        Box::new(p.ap(acc.map(|mut v: Vec<A>| |a: A| {v.push(a); v}))) as Box<dyn Parsler<Output = Vec<A>>>
-    })
-}
-
-// impl<A> Parsler for Sequence<A> {
-//     type Output = Vec<A>;
-//     fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
-//         self.0.iter().try_fold(vec![], |acc, p| {
-//             let (a, input) = p.parse(input)?;
-//             Ok((acc, a, input))
-//         })
-//     }
-// }
-
-struct LookAhead<P: Parsler>(P);
-
-impl<P: Parsler> Parsler for LookAhead<P> {
-    type Output = P::Output;
-    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
-        self.0.parse(input).map(|(output, _)| (output, input))
-    }
-}
-
-const fn item() -> Satisfy<impl Fn(char) -> bool> {
-    Satisfy(|_| true)
-}
-
-const fn char(c: char) -> Satisfy<impl Fn(char) -> bool> {
-    Satisfy(move |c2| c == c2)
-}
-
-impl Parsler for char {
-    type Output = char;
-    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
-        char(*self).parse(input)
-    }
-}
-
-impl<P1: Parsler, P2: Parsler> Parsler for Then<P1, P2> {
-    type Output = P2::Output;
-    fn parse<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str), String> {
-        self.0.parse(input)
-    }
-}
-
-impl<A: Clone> Parsler for Pure<A> {
-    type Output = A;
-    fn parse<'a>(&self, input: &'a str) -> Result<(A, &'a str), std::string::String> {
-        let val = self.0.clone();
-        Ok((val, input))
-    }
-}
-
-// fn hello() -> Parsler<u32> {
-//     dbg!(Parsler::map(Parsler::Pure('a'), Parsler::<fn(char) -> u32>::pure(|a| a as u32 )))
-// }
-
-// impl<A> Parsler<A> {
-//     fn parse<E>(&self, input: &str) -> Result<A, E> {
-//         todo!()
-//     }
-
-//     fn map<B, F: Fn(A) -> B>(self, px: Parsler<F>) -> Parsler<B> {
-
-//     }
-
-//     fn pure<B>(b: B) -> Parsler<B> {
-//         Parsler::Pure(b)
-//     }
-
-// }
-
-// fn ap<A, B, F: Fn() -> Parsler<B>, P: Fn(A) -> B>(p: Parsler<P>, px: F) -> Parsler<B> {
-//     todo!()
-// }
-
-// impl<A, I, B> Parsler<A>
-// where
-//     A: Fn(I) -> B {
-
-//     fn ap<F: FnOnce() -> Parsler<B>>(self, px: F) -> Parsler<C> {
-//         todo!()
-//     }
-// }
-
-// trait Parsler<A> {
-//     type Choice<A>: Parsler<A>;
-//     type AttemptChoice<A>: Parsler<A>;
-//     type Sequence<A>: Parsler<A>;
-//     type Traverse<B>: Parsler<B>;
-//     type Skip<A>: Parsler<A>;
-//     type Exactly<A>: Parsler<A>;
-//     type Option<A>: Parsler<A>;
-//     type Optional<A>: Parsler<A>;
-//     type OptionalAs<A>: Parsler<A>;
-//     type Decide<A>: Parsler<A>;
-//     type Decade<A>: Parsler<A>;
-// }
-
-// impl Combinator {
-//     fn optimise(self) -> Combinator {
-//         match self {
-//             Combinator::Or(left, right) => {
-//                 let left = left.optimise();
-//                 let right = right.optimise();
-//                 match (left, right) {
-//                     (Combinator::And(f1, s1), Combinator::And(f2, s2)) if f1 == f2 => {
-//                         Combinator::And(f1, box Combinator::Or(s1, s2))
-//                     }
-//                     (l, r) => Combinator::Or(box l, box r),
-//                 }
-//             }
-//             other => other,
-//         }
-//     }
-
-//     fn to_rust(&self) -> String {
-//         match self {
-//             Combinator::Or(left, right) => {
-//                 format!("or({}, {})", left.to_rust(), right.to_rust())
-//             }
-//             Combinator::Char(c) => {
-//                 format!("char('{}')", c)
-//             }
-//             Combinator::And(left, right) => {
-//                 format!("and({}, {})", left.to_rust(), right.to_rust())
-//             }
-//         }
-//     }
-// }
-
-#[cfg(test)]
-mod tests {
+mod parser {
     use super::*;
-    #[test]
-    fn test_structure() {
-        dbg!(pure('a')
-            .then(pure('b'))
-            .map(|x| (x as u32 as u8 + 2) as char)
-            .parse(""));
-
-        dbg!(char('a')
-            .parse("a"));
-
-        dbg!(sequence(vec![Box::new('a'), Box::new('b'), Box::new('c')]).parse("abc"));
-
-        // dbg!(pure('a').ap(Pure(|c| (c as u32 + 1) as u8 as char)).opt());
+        pub fn parse_spec(input: TokenStream) -> Spec {
+        let mut statements = Vec::new();
+        let mut iter = input.into_iter();
+        while let Some(statement) = parse_statement(&mut iter) {
+            statements.push(statement);
+        }
+        Spec { statements }
     }
-}
 
-// trait ParserF {
-//     type K;
-//     type A;
-//     type Pure: Fn(Self::A) -> Self;
-//     type Satisfy<F, P2>: Fn (F) -> P2
-//         where
-//             P2: ParserF<K=Self::K, A=char>,
-//             F: Fn(char) -> bool;
-//     type Try: 
-// }
+    fn parse_statement(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Statement> {
+        let mut public = false;
+        if let Some(TokenTree::Ident(ident)) = iter.next() {
+            if ident.to_string() == "pub" {
+                public = true;
+            } else {
+                return None;
+            }
+        }
+        if let Some(TokenTree::Ident(ident)) = iter.next() {
+            if ident.to_string() == "let" {
+                if let Some(TokenTree::Ident(ident)) = iter.next() {
+                    if let Some(TokenTree::Punct(punct)) = iter.next() {
+                        if punct.as_char() == '=' {
+                            if let Some(parser) = parse_parser(iter) {
+                                if let Some(TokenTree::Punct(punct)) = iter.next() {
+                                    if punct.as_char() == ';' {
+                                        return Some(Statement {
+                                            public,
+                                            ident: ident.to_string(),
+                                            parser,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    macro_rules! compose {
+        ( $last:expr ) => { $last };
+        ( $head:expr, $($tail:expr), +) => {
+            compose_two($head, compose!($($tail),+))
+        };
+    }
+
+    fn compose_two<A, B, C, G, F>(f: F, g: G) -> impl Fn(A) -> C
+    where
+        F: Fn(A) -> B,
+        G: Fn(B) -> C,
+    {
+        move |x| g(f(x))
+    }
+
+    fn parse_parser(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Parser> {
+
+
+        if let Some(TokenTree::Ident(ident)) = iter.next() {
+            match ident.to_string().as_str() {
+                "pure" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        parse_pure_val(&mut group.stream().into_iter()).map(Parser::Pure)
+                    } else {
+                        None
+                    }
+                }
+                "satisfy" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        if let Some(TokenTree::Ident(ident)) = group.stream().into_iter().next() {
+                            Some(Parser::Satisfy(Func {
+                                ident: ident.to_string(),
+                            }))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                "try" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        parse_parser(&mut group.stream().into_iter())
+                            .map(compose!(Box::new, Parser::Try))
+                    } else {
+                        None}
+                }
+                "look" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        parse_parser(&mut group.stream().into_iter())
+                            .map(compose!(Box::new, Parser::Look))
+                    } else {
+                        None
+                    }
+                }
+                "neg_look" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        parse_parser(&mut group.stream().into_iter())
+                            .map(compose!(Box::new, Parser::NegLook))
+                    } else {None }
+                }
+                "ap" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        let mut iter = group.stream().into_iter();
+                        let parser1 = parse_parser(&mut iter)?;
+                        if let Some(TokenTree::Punct(punct)) = iter.next() {
+                            if punct.as_char() != ',' {
+                                return None;
+                            }
+                        } else {
+                            return None;
+                        }
+                        let parser2 = parse_parser(&mut iter)?;
+
+                        Some(Parser::Ap(Box::new(parser1), Box::new(parser2)))
+                    } else {
+                        None
+                    }
+                }
+                "or" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        let mut iter = group.stream().into_iter();
+                        let mut or_parsers = Vec::new();
+                        while let Some(parser) = parse_parser(&mut iter) {
+                            or_parsers.push(parser);
+                            if let Some(TokenTree::Punct(punct)) = iter.next() {
+                                if punct.as_char() != ',' {
+                                    return None;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
+                        Some(Parser::Or(or_parsers))
+                    } else {
+                        None
+                    }
+                }
+                "then" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        let mut iter = group.stream().into_iter();
+                        let mut or_parsers = Vec::new();
+                        while let Some(parser) = parse_parser(&mut iter) {
+                            or_parsers.push(parser);
+                            if let Some(TokenTree::Punct(punct)) = iter.next() {
+                                if punct.as_char() != ',' {
+                                    return None;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
+                        Some(Parser::Then(or_parsers))
+                    } else {
+                        None
+                    }
+                }
+                "before" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        let mut iter = group.stream().into_iter();
+                        let mut or_parsers = Vec::new();
+                        while let Some(parser) = parse_parser(&mut iter) {
+                            or_parsers.push(parser);
+                            if let Some(TokenTree::Punct(punct)) = iter.next() {
+                                if punct.as_char() != ',' {
+                                    return None;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
+                        Some(Parser::Before(or_parsers))
+                    } else {
+                        None
+                    }
+                }
+                "branch" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        let mut iter = group.stream().into_iter();
+                        let parser1 = parse_parser(&mut iter)?;
+                        if let Some(TokenTree::Punct(punct)) = iter.next() {
+                            if punct.as_char() != ',' {
+                                return None;
+                            }
+                        } else {
+                            return None;
+                        }
+                        let parser2 = parse_parser(&mut iter)?;
+                        if let Some(TokenTree::Punct(punct)) = iter.next() {
+                            if punct.as_char() != ',' {
+                                return None;
+                            }
+                        } else {
+                            return None;
+                        }
+                        let parser3 = parse_parser(&mut iter)?;
+
+                        Some(Parser::Branch(Box::new(parser1), Box::new(parser2), Box::new(parser3)))
+                    } else {
+                        None
+                    }
+                }
+                "empty" => Some(Parser::Empty),
+                _ => Some(Parser::Ident(ident.to_string())),
+            }
+        } else {
+            None
+        }
+    }
+
+    fn parse_pure_val(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<PureVal> {
+        if let Some(TokenTree::Ident(ident)) = iter.next() {
+            match ident.to_string().as_str() {
+                "func" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        return group
+                            .stream()
+                            .into_iter()
+                            .next()
+                            .map(|tt| PureVal::Func(Func {
+                                ident: tt.to_string()
+                            }
+                            ));
+                    }
+                }
+                "val" => {
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        return group
+                            .stream()
+                            .into_iter()
+                            .next()
+                            .map(|tt| PureVal::Val(tt.to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn parser_parses_pure_val_correctly() {
+        use quote::quote;
+
+        let input: proc_macro2::TokenStream = quote! {
+            pure(val("hello"))
+        }
+        .into();
+
+        let mut iter = input.into_iter();
+
+        let parser = parse_parser(&mut iter).unwrap();
+
+        assert_eq!(parser, Parser::Pure(PureVal::Val("\"hello\"".to_string())));
+    }
+
+    #[test]
+    fn parser_parses_satisfy_correctly() {
+        use quote::quote;
+
+        let input: proc_macro2::TokenStream = quote! {
+            satisfy(hello)
+        }
+        .into();
+
+        let mut iter = input.into_iter();
+
+        let parser = parse_parser(&mut iter).unwrap();
+
+        assert_eq!(
+            parser,
+            Parser::Satisfy(Func {
+                ident: "hello".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parser_parses_try_correctly() {
+        use quote::quote;
+
+        let input: proc_macro2::TokenStream = quote! {
+            try(satisfy(hello))
+        }
+        .into();
+
+        let mut iter = input.into_iter();
+
+        let parser = parse_parser(&mut iter).unwrap();
+
+        assert_eq!(
+            parser,
+            Parser::Try(Box::new(Parser::Satisfy(Func {
+                ident: "hello".to_string()
+            })))
+        );
+    }
+
+    #[test]
+    fn parser_parses_ap_correctly() {
+        use quote::quote;
+        use std::assert_matches::assert_matches;
+
+        let input: proc_macro2::TokenStream = quote! {
+            ap(pure(func(hello)), pure(val("world")))
+        }
+        .into();
+
+        let mut iter = input.into_iter();
+
+        let parser = parse_parser(&mut iter);
+
+        assert_matches!(
+            parser,
+            Some(
+                Parser::Ap(
+                    box Parser::Pure(
+                        PureVal::Func(
+                            Func {
+                                ident: x
+                            }
+                        )
+                    ),
+                    box Parser::Pure(
+                        PureVal::Val(y)
+                    )
+                )
+            ) if x == "hello" && y == "\"world\""
+        );
+    }
+
+    #[test]
+    fn parser_parses_or_correctly() {
+        use quote::quote;
+        use std::assert_matches::assert_matches;
+
+        let input: proc_macro2::TokenStream = quote! {
+            or(pure(func(hello)), pure(val("world")), pure(val("hello")))
+        }
+        .into();
+
+        let mut iter = input.into_iter();
+
+        let parser = parse_parser(&mut iter);
+
+        assert_matches!(
+            parser,
+            Some(
+                Parser::Or(
+                    v
+                )
+                ) if v == vec![Parser::Pure(
+                    PureVal::Func(
+                        Func {
+                            ident: "hello".to_string()
+                        }
+                    )
+                ),
+                Parser::Pure(
+                    PureVal::Val("\"world\"".to_string())
+                ),
+                Parser::Pure(
+                    PureVal::Val("\"hello\"".to_string())
+                )]
+        );
+    }
+
+    #[test]
+    fn parser_parses_branch_correctly() {
+        use quote::quote;
+        use std::assert_matches::assert_matches;
+
+        let input: proc_macro2::TokenStream = quote! {
+            branch(pure(func(hello)), pure(val("world")), pure(val("hello")))
+        }
+        .into();
+
+        let mut iter = input.into_iter();
+
+        let parser = parse_parser(&mut iter);
+
+        assert_matches!(
+            parser,
+            Some(
+                Parser::Branch(
+                    box Parser::Pure(
+                        PureVal::Func(
+                            Func {
+                                ident: x
+                            }
+                        )
+                    ),
+                    box Parser::Pure(
+                        PureVal::Val(y)
+                    ),
+                    box Parser::Pure(
+                        PureVal::Val(z)
+                    )
+                )
+            ) if x == "hello" && y == "\"world\"" && z == "\"hello\""
+        );
+    }}
