@@ -36,6 +36,6 @@ pub mod ast {
 
     #[derive(Debug, PartialEq, Clone)]
     pub struct Func {
-        pub ident: String,
+        pub ident: syn::Expr,
     }
 }

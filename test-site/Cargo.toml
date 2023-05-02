@@ -9,5 +9,7 @@ homepage = "https://github.com/JordanLloydHall/parslers"
 readme = "README.md"
 
 [build-dependencies]
-parslers-macro = { path = "../parslers-macro" }
 syn = { version = "*", features = ["extra-traits"] }
+
+[dependencies]
+parslers-macro = { path = "../parslers-macro" }

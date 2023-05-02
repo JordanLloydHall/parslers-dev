@@ -34,10 +34,15 @@ pub fn parser(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     spec.into()
 }
 
+// mod combinators {
+//     include!(concat!(env!("OUT_DIR"), "/combinators.rs"));
+// }
+
 mod codegen {
     use parslers_lib::ast;
     use proc_macro2::TokenStream;
     use quote::quote;
+    use syn::ExprClosure;
 
     pub fn gen_spec(spec: ast::Spec) -> TokenStream {
         let statements = spec.statements.into_iter().map(gen_statement);
@@ -74,19 +79,17 @@ mod codegen {
                 quote! { Ok((#val, input)) }
             }
             ast::PureVal::Func(ast::Func { ident }) => {
-                let val = syn::parse_str::<syn::Expr>(&ident).unwrap();
-                quote! { Ok((#val, input)) }
+                quote! { Ok((#ident, input)) }
             }
         }
     }
 
-    fn gen_satisfy(ident: String) -> TokenStream {
-        let ident = syn::Ident::new(&ident, proc_macro2::Span::call_site());
+    fn gen_satisfy(ident: syn::Expr) -> TokenStream {
         quote! {
             
                 let mut iter = input.chars();
                 let c = iter.next().ok_or(())?;
-                if #ident(c) {
+                if (#ident)(c) {
                     Ok((c, iter.as_str()))
                 } else {
                     Err(())

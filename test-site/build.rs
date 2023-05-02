@@ -1,5 +1,3 @@
-use syn::parse;
-
 fn main() {
     println!("cargo:rerun-if-changed=combinators.rs");
 

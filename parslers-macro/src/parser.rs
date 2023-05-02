@@ -1,5 +1,7 @@
+// use core::num::dec2flt::parse;
+
 use parslers_lib::ast::*;
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::{TokenStream, TokenTree, Literal};
 
 pub fn parse_spec(input: TokenStream) -> Spec {
     let mut statements = Vec::new();
@@ -80,13 +82,9 @@ fn parse_parser(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Parser
             }
             "satisfy" => {
                 if let Some(TokenTree::Group(group)) = iter.next() {
-                    if let Some(TokenTree::Ident(ident)) = group.stream().into_iter().next() {
                         Some(Parser::Satisfy(Func {
-                            ident: ident.to_string(),
+                            ident: parse_func(&group.to_string()),
                         }))
-                    } else {
-                        None
-                    }
                 } else {
                     None
                 }
@@ -222,6 +220,30 @@ fn parse_parser(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Parser
                 } else {
                     None
                 }
+            },
+            "char" => {
+                if let Some(TokenTree::Group(group)) = iter.next() {
+                    let mut iter = group.stream().into_iter();
+                    if let TokenTree::Literal(lit) = iter.next()? {
+                        let lit = lit.to_string();
+
+                        if lit.len() == 3 {
+                            // then(satisfy(is_a), pure(val('a')))
+                            Some(Parser::Then(vec![
+                                Parser::Satisfy(Func {
+                                    ident: parse_func(&format!("|c| c == {}", lit)),
+                                }),
+                                Parser::Pure(PureVal::Val(lit)),
+                            ]))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             }
             "empty" => Some(Parser::Empty),
             _ => Some(Parser::Ident(ident.to_string())),
@@ -238,7 +260,7 @@ fn parse_pure_val(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Pure
                 if let Some(TokenTree::Group(group)) = iter.next() {
                     return group.stream().into_iter().next().map(|tt| {
                         PureVal::Func(Func {
-                            ident: tt.to_string(),
+                            ident: parse_func(&tt.to_string()),
                         })
                     });
                 }
@@ -253,6 +275,10 @@ fn parse_pure_val(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Pure
     }
     None
 }
+
+fn parse_func(func: &str) -> syn::Expr {
+    syn::parse_str::<syn::Expr>(func).unwrap()
+} 
 
 #[test]
 fn parser_parses_pure_val_correctly() {
@@ -286,7 +312,7 @@ fn parser_parses_satisfy_correctly() {
     assert_eq!(
         parser,
         Parser::Satisfy(Func {
-            ident: "hello".to_string()
+            ident: parse_func("hello")
         })
     );
 }
@@ -307,7 +333,7 @@ fn parser_parses_try_correctly() {
     assert_eq!(
         parser,
         Parser::Try(Box::new(Parser::Satisfy(Func {
-            ident: "hello".to_string()
+            ident: parse_func("hello")
         })))
     );
 }
@@ -341,7 +367,7 @@ fn parser_parses_ap_correctly() {
                     PureVal::Val(y)
                 )
             )
-        ) if x == "hello" && y == "\"world\""
+        ) if x == parse_func("hello") && y == "\"world\""
     );
 }
 
@@ -368,7 +394,7 @@ fn parser_parses_or_correctly() {
             ) if v == vec![Parser::Pure(
                 PureVal::Func(
                     Func {
-                        ident: "hello".to_string()
+                        ident: parse_func("hello")
                     }
                 )
             ),
@@ -413,7 +439,7 @@ fn parser_parses_branch_correctly() {
                     PureVal::Val(z)
                 )
             )
-        ) if x == "hello" && y == "\"world\"" && z == "\"hello\""
+        ) if x == parse_func("hello") && y == "\"world\"" && z == "\"hello\""
     );
 }
 
