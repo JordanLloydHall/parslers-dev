@@ -1,0 +1,13 @@
+[package]
+name = "test-site"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "An implementation of staged-selective parser combinators in Rust"
+repository = "https://github.com/JordanLloydHall/parslers"
+homepage = "https://github.com/JordanLloydHall/parslers"
+readme = "README.md"
+
+[build-dependencies]
+parslers-macro = { path = "../parslers-macro" }
+syn = { version = "*", features = ["extra-traits"] }
