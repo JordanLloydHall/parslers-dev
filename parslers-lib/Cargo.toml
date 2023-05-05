@@ -9,4 +9,6 @@ homepage = "https://github.com/JordanLloydHall/parslers"
 readme = "README.md"
 
 [dependencies]
+proc-macro2 = "1.0.56"
+quote = "1.0.26"
 syn = { version = "*", features = ["extra-traits"] }

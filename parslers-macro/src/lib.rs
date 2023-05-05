@@ -1,7 +1,9 @@
 #![feature(assert_matches)]
 #![feature(box_patterns)]
+
 extern crate proc_macro;
 
+use quote::quote;
 // # Grammar
 // ```
 // <spec> ::= <statement>
@@ -32,6 +34,86 @@ pub fn parser(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let spec = codegen::gen_spec(spec);
 
     spec.into()
+}
+
+#[proc_macro_attribute]
+pub fn combinator(
+    attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let function = syn::parse::<syn::ItemFn>(item).unwrap();
+    let function_name = function.sig.ident.clone();
+    let function_arg_names = function
+        .sig
+        .inputs
+        .clone()
+        .into_iter()
+        .map(|item| {
+            if let syn::FnArg::Typed(pat_type) = item {
+                *pat_type.pat
+            } else {
+                panic!("Expected typed argument")
+            }
+        })
+        .collect::<Vec<_>>();
+    let function_arg_types: Vec<_> = function
+        .sig
+        .inputs
+        .clone()
+        .into_iter()
+        .map(|item| {
+            if let syn::FnArg::Typed(pat_type) = item {
+                *pat_type.ty
+            } else {
+                panic!("Expected typed argument")
+            }
+        })
+        .collect();
+    let function_body = function.block.clone().stmts;
+    let function_output = match function.sig.output.clone() {
+        syn::ReturnType::Default => quote! {()},
+        syn::ReturnType::Type(_, ty) => quote! {#ty},
+    };
+
+    quote! {
+        #[allow(non_camel_case_types)]
+        #[allow(incorrect_ident_case)]
+        struct #function_name;
+
+        impl FnOnce<(#(#function_arg_types,)*)> for #function_name
+        {
+            type Output = #function_output;
+            // Required method
+            extern "rust-call" fn call_once(self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> #function_output {
+                #(#function_body)*
+            }
+        }
+
+        impl FnMut<(#(#function_arg_types,)*)> for #function_name
+        {
+            // type Output = #function_output;
+            // Required method
+            extern "rust-call" fn call_mut(&mut self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> #function_output {
+                #(#function_body)*
+            }
+        } 
+
+        impl Fn<(#(#function_arg_types,)*)> for #function_name
+        {
+            // type Output = #function_output;
+            // Required method
+            extern "rust-call" fn call(&self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> #function_output {
+                #(#function_body)*
+            }
+        }
+
+        impl Reflect for #function_name {
+            fn to_string(&self) -> &'static str {
+                stringify!(#function)
+            }
+        }
+    }
+    .into()
 }
 
 // mod combinators {
@@ -86,7 +168,7 @@ mod codegen {
 
     fn gen_satisfy(ident: syn::Expr) -> TokenStream {
         quote! {
-            
+
                 let mut iter = input.chars();
                 let c = iter.next().ok_or(())?;
                 if (#ident)(c) {
@@ -94,22 +176,22 @@ mod codegen {
                 } else {
                     Err(())
                 }
-            
+
         }
     }
 
     fn gen_then<I>(parsers: I) -> TokenStream
-        where
-            I: IntoIterator<Item = ast::Parser>,
-            <I as IntoIterator>::IntoIter: DoubleEndedIterator {
-
+    where
+        I: IntoIterator<Item = ast::Parser>,
+        <I as IntoIterator>::IntoIter: DoubleEndedIterator,
+    {
         let mut parsers = parsers.into_iter().rev().map(gen_parser);
         let last = parsers.next().unwrap();
         quote! {
-            
+
                 #(let (_, input) = {#parsers}?;)*
                 #last
-            
+
         }
     }
 
