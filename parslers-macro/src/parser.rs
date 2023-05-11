@@ -1,7 +1,7 @@
 // use core::num::dec2flt::parse;
 
 use parslers_lib::ast::*;
-use proc_macro2::{TokenStream, TokenTree, Literal};
+use proc_macro2::{Literal, TokenStream, TokenTree};
 
 pub fn parse_spec(input: TokenStream) -> Spec {
     let mut statements = Vec::new();
@@ -82,9 +82,9 @@ fn parse_parser(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Parser
             }
             "satisfy" => {
                 if let Some(TokenTree::Group(group)) = iter.next() {
-                        Some(Parser::Satisfy(Func {
-                            ident: parse_func(&group.to_string()),
-                        }))
+                    Some(Parser::Satisfy(Func {
+                        ident: group.to_string(),
+                    }))
                 } else {
                     None
                 }
@@ -132,64 +132,67 @@ fn parse_parser(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Parser
                 }
             }
             "or" => {
-                if let Some(TokenTree::Group(group)) = iter.next() {
-                    let mut iter = group.stream().into_iter();
-                    let mut or_parsers = Vec::new();
-                    while let Some(parser) = parse_parser(&mut iter) {
-                        or_parsers.push(parser);
-                        if let Some(TokenTree::Punct(punct)) = iter.next() {
-                            if punct.as_char() != ',' {
-                                return None;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
+                // if let Some(TokenTree::Group(group)) = iter.next() {
+                //     // let mut iter = group.stream().into_iter();
+                //     // let mut or_parsers = Vec::new();
+                //     // while let Some(parser) = parse_parser(&mut iter) {
+                //     //     or_parsers.push(parser);
+                //     //     if let Some(TokenTree::Punct(punct)) = iter.next() {
+                //     //         if punct.as_char() != ',' {
+                //     //             return None;
+                //     //         }
+                //     //     } else {
+                //     //         break;
+                //     //     }
+                //     // }
 
-                    Some(Parser::Or(or_parsers))
-                } else {
-                    None
-                }
+                //     // Some(Parser::Or(or_parsers))
+                // } else {
+                //     None
+                // }
+                None
             }
             "then" => {
-                if let Some(TokenTree::Group(group)) = iter.next() {
-                    let mut iter = group.stream().into_iter();
-                    let mut or_parsers = Vec::new();
-                    while let Some(parser) = parse_parser(&mut iter) {
-                        or_parsers.push(parser);
-                        if let Some(TokenTree::Punct(punct)) = iter.next() {
-                            if punct.as_char() != ',' {
-                                return None;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
+                // if let Some(TokenTree::Group(group)) = iter.next() {
+                //     let mut iter = group.stream().into_iter();
+                //     let mut or_parsers = Vec::new();
+                //     while let Some(parser) = parse_parser(&mut iter) {
+                //         or_parsers.push(parser);
+                //         if let Some(TokenTree::Punct(punct)) = iter.next() {
+                //             if punct.as_char() != ',' {
+                //                 return None;
+                //             }
+                //         } else {
+                //             break;
+                //         }
+                //     }
 
-                    Some(Parser::Then(or_parsers))
-                } else {
-                    None
-                }
+                //     Some(Parser::Then(or_parsers))
+                // } else {
+                //     None
+                // }
+                None
             }
             "before" => {
-                if let Some(TokenTree::Group(group)) = iter.next() {
-                    let mut iter = group.stream().into_iter();
-                    let mut or_parsers = Vec::new();
-                    while let Some(parser) = parse_parser(&mut iter) {
-                        or_parsers.push(parser);
-                        if let Some(TokenTree::Punct(punct)) = iter.next() {
-                            if punct.as_char() != ',' {
-                                return None;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
+                // if let Some(TokenTree::Group(group)) = iter.next() {
+                //     let mut iter = group.stream().into_iter();
+                //     let mut or_parsers = Vec::new();
+                //     while let Some(parser) = parse_parser(&mut iter) {
+                //         or_parsers.push(parser);
+                //         if let Some(TokenTree::Punct(punct)) = iter.next() {
+                //             if punct.as_char() != ',' {
+                //                 return None;
+                //             }
+                //         } else {
+                //             break;
+                //         }
+                //     }
 
-                    Some(Parser::Before(or_parsers))
-                } else {
-                    None
-                }
+                //     Some(Parser::Before(or_parsers))
+                // } else {
+                //     None
+                // }
+                None
             }
             "branch" => {
                 if let Some(TokenTree::Group(group)) = iter.next() {
@@ -220,30 +223,6 @@ fn parse_parser(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Parser
                 } else {
                     None
                 }
-            },
-            "char" => {
-                if let Some(TokenTree::Group(group)) = iter.next() {
-                    let mut iter = group.stream().into_iter();
-                    if let TokenTree::Literal(lit) = iter.next()? {
-                        let lit = lit.to_string();
-
-                        if lit.len() == 3 {
-                            // then(satisfy(is_a), pure(val('a')))
-                            Some(Parser::Then(vec![
-                                Parser::Satisfy(Func {
-                                    ident: parse_func(&format!("|c| c == {}", lit)),
-                                }),
-                                Parser::Pure(PureVal::Val(lit)),
-                            ]))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
             }
             "empty" => Some(Parser::Empty),
             _ => Some(Parser::Ident(ident.to_string())),
@@ -260,7 +239,7 @@ fn parse_pure_val(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Pure
                 if let Some(TokenTree::Group(group)) = iter.next() {
                     return group.stream().into_iter().next().map(|tt| {
                         PureVal::Func(Func {
-                            ident: parse_func(&tt.to_string()),
+                            ident: tt.to_string(),
                         })
                     });
                 }
@@ -278,7 +257,7 @@ fn parse_pure_val(iter: &mut proc_macro2::token_stream::IntoIter) -> Option<Pure
 
 fn parse_func(func: &str) -> syn::Expr {
     syn::parse_str::<syn::Expr>(func).unwrap()
-} 
+}
 
 #[test]
 fn parser_parses_pure_val_correctly() {
@@ -312,7 +291,7 @@ fn parser_parses_satisfy_correctly() {
     assert_eq!(
         parser,
         Parser::Satisfy(Func {
-            ident: parse_func("hello")
+            ident: "hello".to_owned()
         })
     );
 }
@@ -333,7 +312,7 @@ fn parser_parses_try_correctly() {
     assert_eq!(
         parser,
         Parser::Try(Box::new(Parser::Satisfy(Func {
-            ident: parse_func("hello")
+            ident: "hello".to_owned()
         })))
     );
 }
@@ -367,7 +346,7 @@ fn parser_parses_ap_correctly() {
                     PureVal::Val(y)
                 )
             )
-        ) if x == parse_func("hello") && y == "\"world\""
+        ) if x == "hello" && y == "\"world\""
     );
 }
 
@@ -377,7 +356,7 @@ fn parser_parses_or_correctly() {
     use std::assert_matches::assert_matches;
 
     let input: proc_macro2::TokenStream = quote! {
-        or(pure(func(hello)), pure(val("world")), pure(val("hello")))
+        or(pure(func(hello)), pure(val("world")))
     }
     .into();
 
@@ -389,21 +368,18 @@ fn parser_parses_or_correctly() {
         parser,
         Some(
             Parser::Or(
-                v
+                v1, v2
             )
-            ) if v == vec![Parser::Pure(
+            ) if v1.as_ref() == &Parser::Pure(
                 PureVal::Func(
                     Func {
-                        ident: parse_func("hello")
+                        ident: "hello".to_owned()
                     }
                 )
-            ),
-            Parser::Pure(
+            ) && v2.as_ref() ==
+            &Parser::Pure(
                 PureVal::Val("\"world\"".to_string())
-            ),
-            Parser::Pure(
-                PureVal::Val("\"hello\"".to_string())
-            )]
+            )
     );
 }
 
@@ -439,7 +415,7 @@ fn parser_parses_branch_correctly() {
                     PureVal::Val(z)
                 )
             )
-        ) if x == parse_func("hello") && y == "\"world\"" && z == "\"hello\""
+        ) if x == "hello" && y == "\"world\"" && z == "\"hello\""
     );
 }
 

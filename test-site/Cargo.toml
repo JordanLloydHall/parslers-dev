@@ -14,3 +14,4 @@ syn = { version = "*", features = ["extra-traits"] }
 [dependencies]
 parslers-macro = { path = "../parslers-macro" }
 parslers-lib = { path = "../parslers-lib" }
+either = "1.8.1"

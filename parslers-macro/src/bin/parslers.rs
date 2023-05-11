@@ -1,4 +1,4 @@
-use parslers_macro::parser;
+
 
 // parsler!(
 //     let parker = (('a''b') | ('a''c'))
@@ -9,13 +9,13 @@ fn is_a(c: char) -> bool {
 }
 
 // let char: char = |a: char| then(satisfy(|c| c == a), pure(val(a)))
-parser! {
-    pub let a: char = then(satisfy(is_a), pure(val('a')));
-}
+// parser! {
+//     pub let a: char = then(satisfy(is_a), pure(val('a')));
+// }
 
 fn main() {
     // println!("{:?}", parsler("ab"));
-    println!("{:?}", a("a"));
+    // println!("{:?}", a("a"));
 }
 
 // #[cfg(test)]

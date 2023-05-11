@@ -20,9 +20,9 @@ pub enum Parser {
     Look(Box<Parser>),
     NegLook(Box<Parser>),
     Ap(Box<Parser>, Box<Parser>),
-    Then(Vec<Parser>),
-    Before(Vec<Parser>),
-    Or(Vec<Parser>),
+    Then(Box<Parser>, Box<Parser>),
+    Before(Box<Parser>, Box<Parser>),
+    Or(Box<Parser>, Box<Parser>),
     Empty,
     Branch(Box<Parser>, Box<Parser>, Box<Parser>),
 }
@@ -35,5 +35,5 @@ pub enum PureVal {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Func {
-    pub ident: &'static str,
+    pub ident: String,
 }

@@ -3,7 +3,7 @@
 
 extern crate proc_macro;
 
-use quote::quote;
+use quote::{quote, ToTokens};
 // # Grammar
 // ```
 // <spec> ::= <statement>
@@ -38,7 +38,7 @@ pub fn parser(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 #[proc_macro_attribute]
 pub fn combinator(
-    attr: proc_macro::TokenStream,
+    _: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let function = syn::parse::<syn::ItemFn>(item).unwrap();
@@ -69,6 +69,28 @@ pub fn combinator(
             }
         })
         .collect();
+    let function_arg_type_idents = function_arg_types
+        .iter()
+        .map(|t| t.to_token_stream().to_string())
+        .collect::<Vec<_>>();
+    let all_function_generics = function.sig.generics.clone();
+    let function_generics = function
+        .sig
+        .generics
+        .clone()
+        .params
+        .into_iter()
+        .filter_map(|x| match &x {
+            syn::GenericParam::Type(t) => {
+                if function_arg_type_idents.contains(&t.ident.to_string()) {
+                    Some(x)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let function_body = function.block.clone().stmts;
     let function_output = match function.sig.output.clone() {
         syn::ReturnType::Default => quote! {()},
@@ -78,9 +100,10 @@ pub fn combinator(
     quote! {
         #[allow(non_camel_case_types)]
         #[allow(incorrect_ident_case)]
+        #[derive(Clone, Debug)]
         struct #function_name;
 
-        impl FnOnce<(#(#function_arg_types,)*)> for #function_name
+        impl #all_function_generics FnOnce<(#(#function_arg_types,)*)> for #function_name
         {
             type Output = #function_output;
             // Required method
@@ -89,27 +112,27 @@ pub fn combinator(
             }
         }
 
-        impl FnMut<(#(#function_arg_types,)*)> for #function_name
-        {
-            // type Output = #function_output;
-            // Required method
-            extern "rust-call" fn call_mut(&mut self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> #function_output {
-                #(#function_body)*
-            }
-        } 
+        // impl < #(#function_generics, )*> FnMut<(#(#function_arg_types,)*)> for #function_name
+        // {
+        //     // type Output = #function_output;
+        //     // Required method
+        //     extern "rust-call" fn call_mut(&mut self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> <Self as FnOnce<(#(#function_arg_types,)*)>>::Output {
+        //         #(#function_body)*
+        //     }
+        // } 
 
-        impl Fn<(#(#function_arg_types,)*)> for #function_name
-        {
-            // type Output = #function_output;
-            // Required method
-            extern "rust-call" fn call(&self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> #function_output {
-                #(#function_body)*
-            }
-        }
+        // impl < #(#function_generics, )*> Fn<(#(#function_arg_types,)*)> for #function_name
+        // {
+        //     // type Output = #function_output;
+        //     // Required method
+        //     extern "rust-call" fn call(&self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> <Self as FnOnce<(#(#function_arg_types,)*)>>::Output {
+        //         #(#function_body)*
+        //     }
+        // }
 
         impl Reflect for #function_name {
-            fn to_string(&self) -> &'static str {
-                stringify!(#function)
+            fn to_string(&self) -> String {
+                stringify!(#function).to_owned()
             }
         }
     }
@@ -148,8 +171,8 @@ mod codegen {
     fn gen_parser(parser: ast::Parser) -> TokenStream {
         match parser {
             ast::Parser::Pure(pure_val) => gen_pure_val(pure_val),
-            ast::Parser::Satisfy(ast::Func { ident }) => gen_satisfy(ident),
-            ast::Parser::Then(parsers) => gen_then(parsers),
+            ast::Parser::Satisfy(ast::Func { ident }) => gen_satisfy(&ident),
+            ast::Parser::Then(p1, p2) => gen_then(*p1, *p2),
             _ => unimplemented!(),
         }
     }
@@ -166,7 +189,8 @@ mod codegen {
         }
     }
 
-    fn gen_satisfy(ident: syn::Expr) -> TokenStream {
+    fn gen_satisfy(ident: &str) -> TokenStream {
+        let ident = syn::Ident::new(ident, proc_macro2::Span::call_site());
         quote! {
 
                 let mut iter = input.chars();
@@ -180,42 +204,16 @@ mod codegen {
         }
     }
 
-    fn gen_then<I>(parsers: I) -> TokenStream
-    where
-        I: IntoIterator<Item = ast::Parser>,
-        <I as IntoIterator>::IntoIter: DoubleEndedIterator,
-    {
-        let mut parsers = parsers.into_iter().rev().map(gen_parser);
-        let last = parsers.next().unwrap();
+    fn gen_then(p1: ast::Parser, p2: ast::Parser) -> TokenStream {
+        // let mut parsers = parsers.into_iter().rev().map(gen_parser);
+        // let last = parsers.next().unwrap();
+        let p1 = gen_parser(p1);
+        let p2 = gen_parser(p2);
         quote! {
 
-                #(let (_, input) = {#parsers}?;)*
-                #last
+                let (_, input) = {#p1}?;
+                #p2
 
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use crate::parser;
-        use quote::quote;
-
-        #[test]
-        fn test_gen_statement() {
-            let input: proc_macro2::TokenStream = quote! {
-                pub let a: &str = pure(val("a"));
-            }
-            .into();
-
-            let statement = parser::parse_statement(&mut input.into_iter()).unwrap();
-            let expected = quote! {
-                pub fn a(input: &str) -> Result<(&str , &str), ()> {
-                    Ok(("a", input))
-                }
-            }
-            .to_string();
-            assert_eq!(gen_statement(statement).to_string(), expected);
         }
     }
 }
