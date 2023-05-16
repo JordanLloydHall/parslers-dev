@@ -26,18 +26,17 @@ use quote::{quote, ToTokens};
 //             | 'val' '(' <string> ')'
 // <string> ::= [^"]*
 // ```
-mod parser;
 
-#[proc_macro]
-pub fn parser(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let spec = parser::parse_spec(input.into());
-    let spec = codegen::gen_spec(spec);
+// #[proc_macro]
+// pub fn parser(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+//     let spec = parser::parse_spec(input.into());
+//     let spec = codegen::gen_spec(spec);
 
-    spec.into()
-}
+//     spec.into()
+// }
 
 #[proc_macro_attribute]
-pub fn combinator(
+pub fn reflect(
     _: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
@@ -100,8 +99,8 @@ pub fn combinator(
     quote! {
         #[allow(non_camel_case_types)]
         #[allow(incorrect_ident_case)]
-        #[derive(Clone, Debug)]
-        struct #function_name;
+        #[derive(Clone, Copy, Debug)]
+        pub struct #function_name;
 
         impl #all_function_generics FnOnce<(#(#function_arg_types,)*)> for #function_name
         {
@@ -131,7 +130,10 @@ pub fn combinator(
         // }
 
         impl Reflect for #function_name {
-            fn to_string(&self) -> String {
+            fn name(&self) -> &'static str {
+                stringify!(#function_name)
+            }
+            fn reflect(&self) -> String {
                 stringify!(#function).to_owned()
             }
         }
@@ -143,77 +145,77 @@ pub fn combinator(
 //     include!(concat!(env!("OUT_DIR"), "/combinators.rs"));
 // }
 
-mod codegen {
-    use parslers_lib::ast;
-    use proc_macro2::TokenStream;
-    use quote::quote;
-    use syn::ExprClosure;
+// mod codegen {
+//     use parslers_lib::ast;
+//     use proc_macro2::TokenStream;
+//     use quote::quote;
+//     use syn::ExprClosure;
 
-    pub fn gen_spec(spec: ast::Spec) -> TokenStream {
-        let statements = spec.statements.into_iter().map(gen_statement);
-        quote! {
-            #(#statements)*
-        }
-    }
+//     pub fn gen_spec(spec: ast::Spec) -> TokenStream {
+//         let statements = spec.statements.into_iter().map(gen_statement);
+//         quote! {
+//             #(#statements)*
+//         }
+//     }
 
-    fn gen_statement(statement: ast::Statement) -> TokenStream {
-        // let public = statement.public;
-        let ident = syn::Ident::new(&statement.ident, proc_macro2::Span::call_site());
-        let type_ = statement.type_;
-        let parser = gen_parser(statement.parser);
-        quote! {
-            pub fn #ident(input: &str) -> Result<(#type_, &str), ()> {
-                #parser
-            }
-        }
-    }
+//     fn gen_statement(statement: ast::Statement) -> TokenStream {
+//         // let public = statement.public;
+//         let ident = syn::Ident::new(&statement.ident, proc_macro2::Span::call_site());
+//         let type_ = statement.type_;
+//         let parser = gen_parser(statement.parser);
+//         quote! {
+//             pub fn #ident(input: &str) -> Result<(#type_, &str), ()> {
+//                 #parser
+//             }
+//         }
+//     }
 
-    fn gen_parser(parser: ast::Parser) -> TokenStream {
-        match parser {
-            ast::Parser::Pure(pure_val) => gen_pure_val(pure_val),
-            ast::Parser::Satisfy(ast::Func { ident }) => gen_satisfy(&ident),
-            ast::Parser::Then(p1, p2) => gen_then(*p1, *p2),
-            _ => unimplemented!(),
-        }
-    }
+//     fn gen_parser(parser: ast::Parser) -> TokenStream {
+//         match parser {
+//             ast::Parser::Pure(pure_val) => gen_pure_val(pure_val),
+//             ast::Parser::Satisfy(ast::Func { ident }) => gen_satisfy(&ident),
+//             ast::Parser::Then(p1, p2) => gen_then(*p1, *p2),
+//             _ => unimplemented!(),
+//         }
+//     }
 
-    fn gen_pure_val(pure_val: ast::PureVal) -> TokenStream {
-        match pure_val {
-            ast::PureVal::Val(val) => {
-                let val = syn::parse_str::<syn::Expr>(&val).unwrap();
-                quote! { Ok((#val, input)) }
-            }
-            ast::PureVal::Func(ast::Func { ident }) => {
-                quote! { Ok((#ident, input)) }
-            }
-        }
-    }
+//     fn gen_pure_val(pure_val: ast::PureVal) -> TokenStream {
+//         match pure_val {
+//             ast::PureVal::Val(val) => {
+//                 let val = syn::parse_str::<syn::Expr>(&val).unwrap();
+//                 quote! { Ok((#val, input)) }
+//             }
+//             ast::PureVal::Func(ast::Func { ident }) => {
+//                 quote! { Ok((#ident, input)) }
+//             }
+//         }
+//     }
 
-    fn gen_satisfy(ident: &str) -> TokenStream {
-        let ident = syn::Ident::new(ident, proc_macro2::Span::call_site());
-        quote! {
+//     fn gen_satisfy(ident: &str) -> TokenStream {
+//         let ident = syn::Ident::new(ident, proc_macro2::Span::call_site());
+//         quote! {
 
-                let mut iter = input.chars();
-                let c = iter.next().ok_or(())?;
-                if (#ident)(c) {
-                    Ok((c, iter.as_str()))
-                } else {
-                    Err(())
-                }
+//                 let mut iter = input.chars();
+//                 let c = iter.next().ok_or(())?;
+//                 if (#ident)(c) {
+//                     Ok((c, iter.as_str()))
+//                 } else {
+//                     Err(())
+//                 }
 
-        }
-    }
+//         }
+//     }
 
-    fn gen_then(p1: ast::Parser, p2: ast::Parser) -> TokenStream {
-        // let mut parsers = parsers.into_iter().rev().map(gen_parser);
-        // let last = parsers.next().unwrap();
-        let p1 = gen_parser(p1);
-        let p2 = gen_parser(p2);
-        quote! {
+//     fn gen_then(p1: ast::Parser, p2: ast::Parser) -> TokenStream {
+//         // let mut parsers = parsers.into_iter().rev().map(gen_parser);
+//         // let last = parsers.next().unwrap();
+//         let p1 = gen_parser(p1);
+//         let p2 = gen_parser(p2);
+//         quote! {
 
-                let (_, input) = {#p1}?;
-                #p2
+//                 let (_, input) = {#p1}?;
+//                 #p2
 
-        }
-    }
-}
+//         }
+//     }
+// }

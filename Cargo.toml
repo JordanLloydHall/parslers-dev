@@ -3,5 +3,6 @@
 members = [
     "parslers-macro",
     "parslers-lib",
-    "test-site"
+    "test-site",
+    "parslers-json"
 ]

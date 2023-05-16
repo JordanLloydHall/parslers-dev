@@ -11,7 +11,7 @@ pub struct Statement {
     pub parser: Parser,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub enum Parser {
     Ident(String),
     Pure(PureVal),
@@ -27,13 +27,13 @@ pub enum Parser {
     Branch(Box<Parser>, Box<Parser>, Box<Parser>),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub enum PureVal {
     Val(String),
     Func(Func),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Func {
-    pub ident: String,
+    pub name: String,
 }

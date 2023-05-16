@@ -31,4 +31,4 @@ proc-macro2 = "*"
 syn = { version = "*", features = ["extra-traits", "full"] }
 quote = "*"
 proc-macro2 = "*"
-parslers-lib = { path = "../parslers-lib" }
+# parslers-lib = { path = "../parslers-lib" }
