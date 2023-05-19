@@ -99,7 +99,7 @@ pub fn reflect(
     quote! {
         #[allow(non_camel_case_types)]
         #[allow(incorrect_ident_case)]
-        #[derive(Clone, Copy, Debug)]
+        #[derive(Clone, Copy, Debug, Hash)]
         pub struct #function_name;
 
         impl #all_function_generics FnOnce<(#(#function_arg_types,)*)> for #function_name

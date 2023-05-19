@@ -1,0 +1,24 @@
+[package]
+name = "parslers-benchmark"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+
+[[bench]]
+name = "json"
+path = "benches/json.rs"
+harness = false
+
+[build-dependencies]
+parslers-lib = { path = "../parslers-lib" }
+parslers-macro = { path = "../parslers-macro" }
+parslers-json = { path = "../parslers-json" }
+
+[dependencies]
+nom = "7.1.3"
+parslers-json = {path = "../parslers-json"}
+jemallocator = "0.5.0"
+criterion = "0.4.0"

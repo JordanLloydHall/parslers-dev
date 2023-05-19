@@ -58,13 +58,8 @@ fn zip<A: 'static>(a: A) -> Box<dyn FnOnce(A) -> (A, A)> {
 }
 
 #[reflect]
-fn parse_double((a, b): (Vec<char>, Vec<char>)) -> f64 {
-    a.into_iter()
-        .chain(std::iter::once('.'))
-        .chain(b.into_iter())
-        .collect::<String>()
-        .parse::<f64>()
-        .unwrap()
+fn parse_double(s: String) -> f64 {
+    s.parse::<f64>().unwrap()
 }
 
 fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
@@ -74,7 +69,7 @@ fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
             many(
                 (Rc::new(LazyParser::new(|| json()))
                     as Rc<dyn Parsler<Output = parslers_json::Json>>)
-                    .before(match_char(',').attempt().or(pure(' '))),
+                    .before(opt(match_char(',').attempt())),
             )
             .map(concat),
         ))
@@ -85,9 +80,8 @@ fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
 fn string() -> impl Parsler<Output = String> + Clone {
     match_char('\"')
         .attempt()
-        .then(many(not('\"').attempt()))
+        .then(Recognise(many(not('\"').attempt())))
         .before(match_char('\"'))
-        .map(collect_string)
 }
 
 fn object_item() -> impl Parsler<Output = (String, parslers_json::Json)> + Clone {
@@ -116,19 +110,13 @@ fn json() -> impl Parsler<Output = parslers_json::Json> + Clone {
 
     let null = tag("null").attempt().then(pure(parslers_json::Json::Null));
 
-    let number = match_char('.')
-        .attempt()
-        .then(many(one_of('0'..='9')))
-        .or(pure(vec![]))
-        .ap(some(one_of('0'..='9'))
-            .ap(match_char('-')
-                .attempt()
-                .or(pure('0'))
-                .map(singleton)
-                .map(concat))
-            .map(zip))
-        .map(parse_double)
-        .map(json_number);
+    let number = Recognise(
+        opt(match_char('-').attempt())
+            .then(some(one_of('0'..='9')))
+            .then(opt(match_char('.').attempt().then(many(one_of('0'..='9'))))),
+    )
+    .map(parse_double)
+    .map(json_number);
 
     NamedParser(
         null.or(boolean)
@@ -177,38 +165,36 @@ pub fn pretty_print(tokens: TokenStream) -> Result<String, ()> {
 
     Ok(stdout.into())
 }
+// mod hello {
+//     fn some_rev_1146231101952406494(
+//         input: &mut std::str::Chars,
+//     ) -> Result<alloc::vec::Vec<char>, &'static str> {
+//         { { Ok (f14) } . and_then (| f | { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f19) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('0') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f20) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('1') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f21) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('2') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f22) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('3') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f23) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('4') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f24) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('5') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f25) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('6') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f26) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('7') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f27) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('8') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f28) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('9') }) } ; if result . is_err () { * input = copied_input ; } result } } } } } } } } } } } } } } } } } } } . map (| x | f (x))) } . and_then (| f | { many_rev_17877461323594952870 (input) } . map (| x | f (x)))
+//     }
+// }
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
 
     // let json = json();
-    let boolean = tag("true")
-        .attempt()
-        .then(pure(true))
-        .or(tag("false").attempt().then(pure(false)))
-        .map(json_bool);
 
-    let number = match_char('.')
-        .attempt()
-        .then(many(one_of('0'..='9')))
-        .or(pure(vec![]))
-        .ap(some(one_of('0'..='9'))
-            .ap(match_char('-')
-                .attempt()
-                .or(pure('0'))
-                .map(singleton)
-                .map(concat))
-            .map(zip))
-        .map(parse_double)
-        .map(json_number);
-
-    let null = tag("null").attempt().then(pure(parslers_json::Json::Null));
-
-    let string = string().map(json_string);
+    // let number = match_char('.')
+    //     .attempt()
+    //     .then(many(one_of('0'..='9')))
+    //     .or(pure(vec![]))
+    //     .ap(some(one_of('0'..='9'))
+    //         .ap(match_char('-')
+    //             .attempt()
+    //             .or(pure('0'))
+    //             .map(singleton)
+    //             .map(concat))
+    //         .map(zip))
+    //     .map(parse_double)
+    //     .map(json_number)
 
     // let null_or_bool_or_num = null.or(boolean).or(number);
 
-    let non_recurse = number.or(string);
+    // let non_recurse = number.or(string);
 
     // let input = "[1,2,3,4,5]";
 
@@ -216,11 +202,31 @@ fn main() {
 
     // let filt = filtered_by(one_of('a'..='b'), is_a);
 
-    // let some = some(match_char('a'));
+    // let number = Recognise(
+    //     opt(match_char('-').attempt())
+    //         .then(some(one_of('0'..='9')))
+    //         .then(opt(match_char('.').attempt().then(many(one_of('0'..='9')))));
 
     let context = &mut parslers_lib::code_gen::CompileContext::new();
 
-    let p = parslers_lib::code_gen::compile("hello", non_recurse, context);
+    let mut p = parslers_lib::code_gen::compile("hello", json(), context);
+
+    context.optimise_named_parsers();
+
+    eprintln!("{:#?}", context.parsers_with_unused);
+
+    // eprintln!(
+    //     "{:#?}",
+    //     context
+    //         .named_parsers
+    //         .get("many_rev_17877461323594952870_unused")
+    //         .unwrap()
+    //         .as_ref()
+    //         .unwrap()
+    //         .parser
+    // );
+
+    // p.parser = parslers_lib::ast::optimise(p.parser);
 
     let parslers_out = parslers_lib::code_gen::gen_statement(p, context).to_string();
 

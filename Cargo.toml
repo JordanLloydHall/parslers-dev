@@ -4,5 +4,12 @@ members = [
     "parslers-macro",
     "parslers-lib",
     "test-site",
-    "parslers-json"
+    "parslers-json",
+    "parslers-benchmark"
 ]
+
+[profile.release]
+# strip = true
+# lto = true
+# panic = "abort"
+debug = 1

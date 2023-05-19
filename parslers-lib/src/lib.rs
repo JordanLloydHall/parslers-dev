@@ -1,4 +1,11 @@
-#![feature(unboxed_closures, fn_traits, type_name_of_val, lazy_cell, never_type)]
+#![feature(
+    unboxed_closures,
+    fn_traits,
+    type_name_of_val,
+    lazy_cell,
+    never_type,
+    box_patterns
+)]
 
 pub mod ast;
 pub mod builder;
