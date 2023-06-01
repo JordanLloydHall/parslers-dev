@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{self, AnalysedParser, Parser, Spec, Statement},
+    ast::{self, AnalysedParser, Statement},
     parsler::Parsler,
     reflect::Reflect,
 };
@@ -12,6 +12,11 @@ pub struct CompileContext {
     functions: HashMap<String, String>,
     pub named_parsers: HashMap<String, Option<ast::Statement>>,
     pub parsers_with_unused: HashSet<String>,
+}
+
+pub enum NamedParserStatus {
+    Registered,
+    Unregistered,
 }
 
 impl CompileContext {
@@ -31,12 +36,15 @@ impl CompileContext {
             .clone()
     }
 
-    pub fn register_parser(&mut self, name: &str) -> Option<Option<String>> {
+    pub fn register_parser(&mut self, name: &str) -> NamedParserStatus {
         let res = self.named_parsers.get(name).cloned();
         if let None = res {
             self.named_parsers.insert(name.to_owned(), None);
         }
-        res.map(|op| op.map(|s| s.ident))
+        match res {
+            Some(_) => NamedParserStatus::Registered,
+            None => NamedParserStatus::Unregistered,
+        }
     }
 
     pub fn insert_parser<P: Parsler>(&mut self, name: &str, parser: ast::Parser) {
@@ -53,11 +61,7 @@ impl CompileContext {
                     public: false,
                     ident: name.to_owned(),
                     type_,
-                    parser: AnalysedParser {
-                        parser,
-                        output_used: true,
-                        returns_func: true,
-                    },
+                    parser: AnalysedParser::new(parser),
                 })
             }
         }
@@ -70,8 +74,19 @@ impl CompileContext {
     }
 
     pub fn optimise_named_parsers(&mut self) {
-        for (name, parser) in self.named_parsers.iter_mut() {
+        for (_name, parser) in self.named_parsers.iter_mut() {
             if let Some(s) = parser {
+                let size = s.parser.size();
+                let depth = s.parser.depth();
+                s.parser = s.parser.clone().reduce();
+                eprintln!(
+                    "Reduced parser '{}' from ({}, {}) to ({}, {})",
+                    s.ident,
+                    size,
+                    depth,
+                    s.parser.size(),
+                    s.parser.depth()
+                );
                 s.parser
                     .output_used_analysis(true, &mut self.parsers_with_unused);
             }
@@ -106,17 +121,6 @@ impl CompileContext {
             self.parsers_with_unused = self.parsers_with_unused.union(&new).cloned().collect();
             // new = self.parsers_with_unused.clone();
         }
-
-        for (name, parser) in self.named_parsers.iter_mut() {
-            if let Some(s) = parser {
-                let old_size = s.parser.size();
-                s.parser = s.parser.clone().reduce();
-                // s.parser
-                //     .output_used_analysis(true, &mut self.parsers_with_unused);
-                let new_size = s.parser.size();
-                eprintln!("{}: {} -> {}", name, old_size, new_size);
-            }
-        }
     }
 }
 
@@ -146,11 +150,31 @@ pub fn compile<P: Parsler>(name: &str, parser: P, context: &mut CompileContext) 
 //     }
 // }
 
-pub fn gen_statement(statement: ast::Statement, context: &mut CompileContext) -> TokenStream {
+// fn compose_<A, B, C, G, F>(g: G) -> impl FnOnce(F) -> impl FnOnce(A) -> C
+// where
+//     F: FnOnce(A) -> B + 'static,
+//     G: FnOnce(B) -> C + 'static,
+// {
+//     move |f| Box::new(move |x| g(f(x)))
+// }
+
+pub fn gen_statement(statements: &[ast::Statement], context: &mut CompileContext) -> TokenStream {
     // let public = statement.public;
-    let ident = syn::Ident::new(&statement.ident, proc_macro2::Span::call_site());
-    let type_ = statement.type_;
-    let parser = statement.parser.compile();
+
+    let statements = statements
+        .iter()
+        .map(|statement| {
+            let ident = syn::Ident::new(&statement.ident, proc_macro2::Span::call_site());
+            let type_ = statement.type_.clone();
+            let parser = statement.parser.compile();
+
+            quote! {
+                pub fn #ident(input: &mut std::str::Chars) -> Result<#type_, &'static str> {
+                    #parser
+                }
+            }
+        })
+        .collect::<Vec<_>>();
 
     let functions = context
         .functions
@@ -186,11 +210,17 @@ pub fn gen_statement(statement: ast::Statement, context: &mut CompileContext) ->
         .collect::<Vec<_>>();
     quote! {
         extern crate alloc;
+        #[inline(always)]
+        fn compose_<A, B, C, G, F>(g: G) -> impl FnOnce(F) -> (Box<dyn FnOnce(A) -> C>)
+        where
+            F: FnOnce(A) -> B + 'static,
+            G: FnOnce(B) -> C + 'static,
+        {
+            move |f| Box::new(move |x| g(f(x)))
+        }
         #(#functions)*
         #(#aux_parsers)*
-        pub fn #ident(input: &mut std::str::Chars) -> Result<#type_, &'static str> {
-            #parser
-        }
+        #(#statements)*
     }
 }
 

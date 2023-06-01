@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
 
-use crate::code_gen::CompileContext;
 use quote::quote;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -22,6 +21,7 @@ pub struct Statement {
 pub struct AnalysedParser {
     pub output_used: bool,
     pub returns_func: bool,
+    pub cut_point: Option<bool>,
     pub parser: Parser,
 }
 
@@ -30,6 +30,7 @@ impl AnalysedParser {
         AnalysedParser {
             output_used: true,
             returns_func: true,
+            cut_point: None,
             parser,
         }
     }
@@ -38,11 +39,16 @@ impl AnalysedParser {
         self.parser.size()
     }
 
+    pub fn depth(&self) -> usize {
+        self.parser.depth()
+    }
+
     pub fn reduce(self) -> Self {
         AnalysedParser {
             output_used: self.output_used,
             returns_func: self.returns_func,
-            parser: self.parser.reduce(),
+            cut_point: self.cut_point,
+            parser: self.parser.reduce_down().reduce_up(),
         }
     }
 
@@ -67,6 +73,79 @@ impl AnalysedParser {
             self.parser.compile_unused(self.returns_func)
         }
     }
+
+    pub fn cut_analysis(&mut self, backtracks: bool) -> bool {
+        match &mut self.parser {
+            Parser::Ident(_) => false,
+            Parser::Pure(_) => false,
+            Parser::Satisfy(_) => {
+                if backtracks {
+                    self.cut_point = Some(!backtracks);
+                }
+                true
+            }
+            Parser::Try(p) => {
+                let cut = p.cut_analysis(true);
+                self.cut_point = Some(cut && !backtracks);
+                cut
+            }
+            Parser::Look(p) => {
+                p.cut_analysis(backtracks);
+                self.cut_point = Some(false);
+                false
+            }
+            Parser::NegLook(p) => {
+                p.cut_analysis(true);
+                self.cut_point = Some(false);
+                false
+            }
+            Parser::Ap(p, q) => {
+                let p_cut = p.cut_analysis(backtracks);
+                let q_cut = q.cut_analysis(backtracks || p_cut);
+
+                p_cut || q_cut
+            }
+            Parser::Then(p, q) => {
+                let p_cut = p.cut_analysis(backtracks);
+                let q_cut = q.cut_analysis(backtracks || p_cut);
+
+                p_cut || q_cut
+            }
+            Parser::Before(p, q) => {
+                let p_cut = p.cut_analysis(backtracks);
+                let q_cut = q.cut_analysis(backtracks || p_cut);
+
+                p_cut || q_cut
+            }
+            Parser::Or(p, q) => q.cut_analysis(backtracks),
+            Parser::Recognise(p) => p.cut_analysis(backtracks),
+            Parser::Empty => false,
+            Parser::Branch(b, l, r) => {
+                let b_cut = b.cut_analysis(backtracks);
+                let l_cut = l.cut_analysis(backtracks || b_cut);
+                let r_cut = r.cut_analysis(backtracks || b_cut);
+
+                b_cut || (l_cut && r_cut)
+            }
+
+            Parser::Loop(p0, pn) => {
+                let p0_cut = p0.cut_analysis(backtracks);
+                let pn_cut = pn.cut_analysis(backtracks || p0_cut);
+
+                p0_cut || pn_cut
+            }
+        }
+    }
+
+    // pub fn length_check_analysis(&mut self) -> usize {
+    //     self.input_length_checked = self.parser.length_check_analysis();
+    //     self.input_length_checked
+    // }
+
+    // pub fn cut_point_analysis(&mut self) -> bool {
+    //     self.cut_point = self.parser.cut_point_analysis();
+    //     self.cut_point
+    // }
 }
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
@@ -111,34 +190,28 @@ impl Parser {
         }
     }
 
-    pub fn reduce(self) -> Self {
-        let p = match self {
-            Parser::Pure(p) => Parser::Pure(p),
-            Parser::Satisfy(s) => Parser::Satisfy(s),
-            Parser::Try(box p) => Parser::Try(Box::new(p.reduce())),
-            Parser::Look(box p) => Parser::Look(Box::new(p.reduce())),
-            Parser::NegLook(box p) => Parser::NegLook(Box::new(p.reduce())),
-            Parser::Ap(box p, box q) => Parser::Ap(Box::new(p.reduce()), Box::new(q.reduce())),
-            Parser::Then(box p, box q) => Parser::Then(Box::new(p.reduce()), Box::new(q.reduce())),
-            Parser::Before(box p, box q) => {
-                Parser::Before(Box::new(p.reduce()), Box::new(q.reduce()))
-            }
-            Parser::Or(box p, box q) => Parser::Or(Box::new(p.reduce()), Box::new(q.reduce())),
-            Parser::Empty => Parser::Empty,
-            Parser::Branch(box p, box q, box r) => Parser::Branch(
-                Box::new(p.reduce()),
-                Box::new(q.reduce()),
-                Box::new(r.reduce()),
-            ),
-            Parser::Ident(id) => Parser::Ident(id),
-            Parser::Recognise(box p) => Parser::Recognise(Box::new(p.reduce())),
-            Parser::Loop(box p0, box pn) => {
-                Parser::Loop(Box::new(p0.reduce()), Box::new(pn.reduce()))
-            }
-        };
+    pub fn depth(&self) -> usize {
+        match self {
+            Parser::Pure(_) => 1,
+            Parser::Satisfy(_) => 1,
+            Parser::Try(p) => 1 + p.depth(),
+            Parser::Look(p) => 1 + p.depth(),
+            Parser::NegLook(p) => 1 + p.depth(),
+            Parser::Ap(p, q) => 1 + p.depth().max(q.depth()),
+            Parser::Then(p, q) => 1 + p.depth().max(q.depth()),
+            Parser::Before(p, q) => 1 + p.depth().max(q.depth()),
+            Parser::Or(p, q) => 1 + p.depth().max(q.depth()),
+            Parser::Empty => 1,
+            Parser::Branch(p, q, r) => 1 + p.depth().max(q.depth()).max(r.depth()),
+            Parser::Ident(_) => 1,
+            Parser::Recognise(p) => 1 + p.depth(),
+            Parser::Loop(p0, pn) => 1 + p0.depth().max(pn.depth()),
+        }
+    }
 
-        // Special cases
-        match p {
+    pub fn reduce_up(self) -> Self {
+        // eprintln!("Reducing parser: {:?}", self);
+        match self {
             Parser::Ap(
                 box AnalysedParser {
                     parser: Parser::Pure(PureVal::Val(val)),
@@ -151,17 +224,31 @@ impl Parser {
             ) => Parser::Pure(PureVal::Val(format!("{}({})", f.name, val))),
             Parser::Ap(
                 box AnalysedParser {
+                    parser: Parser::Pure(PureVal::Func(f2)),
+                    ..
+                },
+                box AnalysedParser {
+                    parser: Parser::Pure(PureVal::Func(f1)),
+                    ..
+                },
+            ) => {
+                eprintln!("Reduced parser!");
+                Parser::Pure(PureVal::Func(Func {
+                    name: format!("{}({})", f1.name, f2.name),
+                }))
+            }
+            Parser::Ap(
+                box AnalysedParser {
                     parser: Parser::Pure(PureVal::Val(val)),
                     ..
                 },
                 p,
             ) => Parser::Ap(
                 p,
-                Box::new(AnalysedParser {
-                    parser: Parser::Pure(PureVal::Val(format!("|f| f({})", val))),
-                    output_used: true,
-                    returns_func: true,
-                }),
+                Box::new(AnalysedParser::new(Parser::Pure(PureVal::Val(format!(
+                    "|f| f({})",
+                    val
+                ))))),
             ),
             Parser::Or(
                 box AnalysedParser {
@@ -170,14 +257,13 @@ impl Parser {
                 },
                 box r,
             ) => Parser::Or(
-                Box::new(p.reduce()),
-                Box::new(AnalysedParser {
-                    parser: Parser::Or(Box::new(q.reduce()), Box::new(r.reduce())),
-                    output_used: true,
-                    returns_func: true,
-                }),
+                Box::new(AnalysedParser::new(p.parser.reduce_up())),
+                Box::new(AnalysedParser::new(Parser::Or(
+                    Box::new(AnalysedParser::new(q.parser.reduce_up())),
+                    Box::new(AnalysedParser::new(r.parser.reduce_up())),
+                ))),
             )
-            .reduce(),
+            .reduce_up(),
             Parser::Or(
                 box AnalysedParser {
                     parser: Parser::Empty,
@@ -191,7 +277,7 @@ impl Parser {
                     parser: Parser::Empty,
                     ..
                 },
-            ) => p.parser.reduce(),
+            ) => p.parser.reduce_up(),
             Parser::Ap(
                 _,
                 box AnalysedParser {
@@ -206,7 +292,6 @@ impl Parser {
                 },
                 _,
             ) => Parser::Pure(x),
-            // Parser::Try(box Parser::Satisfy(f)) => Parser::Satisfy(f),
             Parser::Try(box AnalysedParser {
                 parser: Parser::Pure(x),
                 ..
@@ -215,14 +300,94 @@ impl Parser {
                 parser: Parser::Empty,
                 ..
             }) => Parser::Empty,
-            // Parser::Ap(box Parser::Ap(w, v), u) => Parser::Ap(w, Box::new(Parser::Ap(v, Box::new(Parser::Ap(u, Box::new(Parser::Pure()))))))
-            _ => p,
+            Parser::Ap(
+                box AnalysedParser {
+                    parser: Parser::Ap(w, v),
+                    ..
+                },
+                u,
+            ) => Parser::Ap(
+                w,
+                Box::new(AnalysedParser::new(
+                    Parser::Ap(
+                        v,
+                        Box::new(AnalysedParser::new(
+                            Parser::Ap(
+                                u,
+                                Box::new(AnalysedParser::new(Parser::Pure(PureVal::Func(Func {
+                                    name: "compose_".to_owned(),
+                                })))),
+                            )
+                            .reduce_up(),
+                        )),
+                    )
+                    .reduce_up(),
+                )),
+            )
+            .reduce_up(),
+            other => other,
         }
+    }
+
+    pub fn reduce_down(self) -> Self {
+        // #[decurse::decurse]
+        // fn reduce_down_(p: Parser) -> Parser {
+        let p = match self {
+            Parser::Pure(p) => Parser::Pure(p),
+            Parser::Satisfy(s) => Parser::Satisfy(s),
+            Parser::Try(box p) => {
+                Parser::Try(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+            }
+            Parser::Look(box p) => {
+                Parser::Look(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+            }
+            Parser::NegLook(box p) => {
+                Parser::NegLook(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+            }
+            Parser::Ap(box p, box q) => Parser::Ap(
+                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
+                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+            ),
+            Parser::Then(box p, box q) => Parser::Then(
+                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
+                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+            ),
+            Parser::Before(box p, box q) => Parser::Before(
+                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
+                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+            ),
+            Parser::Or(box p, box q) => Parser::Or(
+                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
+                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+            ),
+            Parser::Empty => Parser::Empty,
+            Parser::Branch(box p, box q, box r) => Parser::Branch(
+                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
+                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+                Box::new(AnalysedParser::new((r.parser.reduce_down()))),
+            ),
+            Parser::Ident(id) => Parser::Ident(id),
+            Parser::Recognise(box p) => {
+                Parser::Recognise(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+            }
+            Parser::Loop(box p0, box pn) => Parser::Loop(
+                Box::new(AnalysedParser::new((p0.parser.reduce_down()))),
+                Box::new(AnalysedParser::new((pn.parser.reduce_down()))),
+            ),
+        };
+
+        p.reduce_up()
+        // }
+
+        // reduce_down_(self)
+        // Special cases
+
+        // eprintln!("Finished reduction");
     }
 
     pub fn returns_func_analysis(&mut self) -> bool {
         match self {
-            Parser::Ident(f) => true,
+            Parser::Ident(_f) => true,
             Parser::Pure(PureVal::Func(_)) => true,
             Parser::Pure(PureVal::Val(_)) => false,
             Parser::Satisfy(_) => false,
@@ -298,12 +463,13 @@ impl Parser {
             }
             Parser::Ident(id) => {
                 if !used {
+                    let new_name = format!("{}_unused", id);
                     if !ctx.contains(id.strip_suffix("_unused").unwrap_or(id)) {
-                        let new_name = format!("{}_unused", id);
                         ctx.insert(id.clone());
-                        *id = new_name;
                     }
+                    *id = new_name;
                 }
+                println!("{} {}, {:?}", id, used, ctx);
             }
             Parser::Loop(p0, pn) => {
                 p0.output_used_analysis(used, ctx);
@@ -313,7 +479,7 @@ impl Parser {
         }
     }
 
-    pub fn compile_used(&self, returns_func: bool) -> TokenStream {
+    pub fn compile_used(&self, _returns_func: bool) -> TokenStream {
         match self {
             Parser::Ident(s) => {
                 let ident = syn::parse_str::<syn::Expr>(s).unwrap();
@@ -327,7 +493,7 @@ impl Parser {
                     quote! { Ok(#val) }
                 }
                 PureVal::Func(Func { name }) => {
-                    let ident = syn::parse_str::<syn::Ident>(&name).unwrap();
+                    let ident = syn::parse_str::<syn::Expr>(&name).unwrap();
                     quote! { Ok(#ident) }
                 }
             },
@@ -417,9 +583,9 @@ impl Parser {
             }
             Parser::Empty => quote! { Err("Expected empty") },
             Parser::Branch(b, l, r) => {
-                let (b1) = b.compile();
-                let (l1) = l.compile();
-                let (r1) = r.compile();
+                let b1 = b.compile();
+                let l1 = l.compile();
+                let r1 = r.compile();
 
                 let l: TokenStream = if l.returns_func {
                     quote! { {#l1}.map(|f| f(l)) }
@@ -446,7 +612,7 @@ impl Parser {
                 quote! {
                     {#p0}.map(|mut v| {
                         while let Ok(x) = {#pn} {
-                            v.push(x);
+                            v = x(v);
                         }
                         v
                     })
@@ -455,7 +621,7 @@ impl Parser {
         }
     }
 
-    pub fn compile_unused(&self, returns_func: bool) -> TokenStream {
+    pub fn compile_unused(&self, _returns_func: bool) -> TokenStream {
         match self {
             Parser::Ident(s) => {
                 let ident = syn::parse_str::<syn::Expr>(s).unwrap();
@@ -464,10 +630,10 @@ impl Parser {
                 }
             }
             Parser::Pure(pure_val) => match pure_val {
-                PureVal::Val(val) => {
+                PureVal::Val(_val) => {
                     quote! { Ok(()) }
                 }
-                PureVal::Func(Func { name }) => {
+                PureVal::Func(Func { name: _ }) => {
                     quote! { Ok(()) }
                 }
             },
@@ -556,9 +722,9 @@ impl Parser {
             }
             Parser::Empty => quote! { Err("Expected empty") },
             Parser::Branch(b, l, r) => {
-                let (b1) = b.compile();
-                let (l1) = l.compile();
-                let (r1) = r.compile();
+                let b1 = b.compile();
+                let l1 = l.compile();
+                let r1 = r.compile();
 
                 quote! {
                     {#b1}.and_then(|b| match b {
@@ -579,6 +745,61 @@ impl Parser {
             }
         }
     }
+
+    // fn length_check_analysis(&mut self) -> usize {
+    //     match self {
+    //         Parser::Ident(_) => 0,
+    //         Parser::Pure(_) => 0,
+    //         Parser::Satisfy(_) => 1,
+    //         Parser::Try(p) => p.length_check_analysis(),
+    //         Parser::Look(p) => p.length_check_analysis(),
+    //         Parser::NegLook(p) => p.length_check_analysis(),
+    //         Parser::Ap(p, q) => p.length_check_analysis() + q.length_check_analysis(),
+    //         Parser::Then(p, q) => p.length_check_analysis() + q.length_check_analysis(),
+    //         Parser::Before(p, q) => p.length_check_analysis() + q.length_check_analysis(),
+    //         Parser::Or(p, q) => {
+    //             q.length_check_analysis();
+    //             p.length_check_analysis()
+    //         }
+    //         Parser::Recognise(p) => p.length_check_analysis(),
+    //         Parser::Empty => 0,
+    //         Parser::Branch(b, l, r) => {
+    //             b.length_check_analysis() + l.length_check_analysis().min(r.length_check_analysis())
+    //         }
+    //         Parser::Loop(p, q) => p.length_check_analysis() + q.length_check_analysis(),
+    //     }
+    // }
+
+    // fn cut_point_analysis(&mut self, demands_cut: bool) -> bool {
+    //     match (self, demands_cut) {
+    //         (Parser::Ident(_), _) => false,
+    //         (Parser::Satisfy(_), _) => true,
+    //         (Parser::Pure(_), true) => todo!(),
+    //         (Parser::Pure(_), false) => todo!(),
+    //         (Parser::Try(_), true) => todo!(),
+    //         (Parser::Try(_), false) => todo!(),
+    //         (Parser::Look(_), true) => todo!(),
+    //         (Parser::Look(_), false) => todo!(),
+    //         (Parser::NegLook(_), true) => todo!(),
+    //         (Parser::NegLook(_), false) => todo!(),
+    //         (Parser::Ap(_, _), true) => todo!(),
+    //         (Parser::Ap(_, _), false) => todo!(),
+    //         (Parser::Then(_, _), true) => todo!(),
+    //         (Parser::Then(_, _), false) => todo!(),
+    //         (Parser::Before(_, _), true) => todo!(),
+    //         (Parser::Before(_, _), false) => todo!(),
+    //         (Parser::Or(_, _), true) => todo!(),
+    //         (Parser::Or(_, _), false) => todo!(),
+    //         (Parser::Recognise(_), true) => todo!(),
+    //         (Parser::Recognise(_), false) => todo!(),
+    //         (Parser::Empty, true) => todo!(),
+    //         (Parser::Empty, false) => todo!(),
+    //         (Parser::Branch(_, _, _), true) => todo!(),
+    //         (Parser::Branch(_, _, _), false) => todo!(),
+    //         (Parser::Loop(_, _), true) => todo!(),
+    //         (Parser::Loop(_, _), false) => todo!(),
+    //     }
+    // }
 }
 
 // pub struct AnalysedParser {

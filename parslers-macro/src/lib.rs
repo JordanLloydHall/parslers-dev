@@ -4,6 +4,10 @@
 extern crate proc_macro;
 
 use quote::{quote, ToTokens};
+use syn::{
+    punctuated::Punctuated, Expr, ExprCall, ExprPath, Path, PathSegment, Stmt, Type, TypePath,
+    TypeTraitObject,
+};
 // # Grammar
 // ```
 // <spec> ::= <statement>
@@ -37,10 +41,11 @@ use quote::{quote, ToTokens};
 
 #[proc_macro_attribute]
 pub fn reflect(
-    _: proc_macro::TokenStream,
+    arg: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let function = syn::parse::<syn::ItemFn>(item).unwrap();
+    // let function = syn::parse::<syn::ItemFn>(item).unwrap();
+    let function = syn::parse_macro_input!(item as syn::ItemFn);
     let function_name = function.sig.ident.clone();
     let function_arg_names = function
         .sig
@@ -73,7 +78,7 @@ pub fn reflect(
         .map(|t| t.to_token_stream().to_string())
         .collect::<Vec<_>>();
     let all_function_generics = function.sig.generics.clone();
-    let function_generics = function
+    let _function_generics = function
         .sig
         .generics
         .clone()
@@ -90,10 +95,111 @@ pub fn reflect(
             _ => None,
         })
         .collect::<Vec<_>>();
-    let function_body = function.block.clone().stmts;
+    let mut function_body = function.block.clone().stmts;
+    let mut impl_ty = None;
     let function_output = match function.sig.output.clone() {
         syn::ReturnType::Default => quote! {()},
-        syn::ReturnType::Type(_, ty) => quote! {#ty},
+        syn::ReturnType::Type(_, ty) => {
+            if let Type::Path(TypePath {
+                qself: None,
+                path:
+                    Path {
+                        leading_colon: None,
+                        segments,
+                    },
+            }) = ty.clone().as_ref()
+            {
+                if let Some(PathSegment {
+                    ident,
+                    arguments: syn::PathArguments::AngleBracketed(args),
+                }) = segments.first()
+                {
+                    if ident == "Box" {
+                        if let Some(syn::GenericArgument::Type(Type::TraitObject(
+                            TypeTraitObject {
+                                dyn_token: Some(Dyn),
+                                bounds,
+                            },
+                        ))) = args.args.first()
+                        {
+                            impl_ty = Some(quote! {
+                                impl #bounds
+                            })
+                        }
+                    }
+                }
+            }
+            quote! {
+                #ty
+            }
+        }
+    };
+
+    // [PathSegment {
+    //     ident:
+    //         Ident {
+    //             ident: "Box",
+    //             span: _,
+    //         },
+    //     arguments:
+    //         PathArguments::AngleBracketed {
+    //             colon2_token: None,
+    //             lt_token: Lt,
+    //             args:
+    //                 [GenericArgument::Type(Type::TraitObject {
+    //                     dyn_token: Some(Dyn),
+    //                     bounds,
+    //                 })],
+    //             gt_token: Gt,
+    //         },
+    // }]
+
+    let mut new_function_body = function_body.clone();
+
+    if impl_ty.is_some() {
+        if let Stmt::Expr(
+            Expr::Call(ExprCall {
+                attrs: _,
+                func:
+                    box Expr::Path(ExprPath {
+                        attrs: _,
+                        qself: None,
+                        path:
+                            Path {
+                                leading_colon: None,
+                                segments,
+                            },
+                    }),
+                paren_token: Paren,
+                args,
+            }),
+            None,
+        ) = function_body.last().cloned().unwrap()
+        {
+            let mut iter = segments.iter();
+            if let Some(PathSegment {
+                ident,
+                arguments: _,
+            }) = iter.next()
+            {
+                if ident == "Box" && iter.next().unwrap().ident == "new" {
+                    *new_function_body.last_mut().unwrap() =
+                        Stmt::Expr(args.first().unwrap().clone(), None);
+                }
+            }
+        }
+    }
+
+    let impl_ty = impl_ty.unwrap_or_else(|| quote! {#function_output});
+
+    let new_function = if arg.to_string() == "unbox" {
+        quote! {
+            fn #function_name #all_function_generics(#(#function_arg_names: #function_arg_types,)*) -> #impl_ty {
+                #(#new_function_body)*
+            }
+        }
+    } else {
+        quote! {#function}
     };
 
     quote! {
@@ -106,7 +212,7 @@ pub fn reflect(
         {
             type Output = #function_output;
             // Required method
-            extern "rust-call" fn call_once(self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> #function_output {
+            extern "rust-call" fn call_once(self, (#(#function_arg_names,)*): (#(#function_arg_types,)*)) -> Self::Output {
                 #(#function_body)*
             }
         }
@@ -134,7 +240,7 @@ pub fn reflect(
                 stringify!(#function_name)
             }
             fn reflect(&self) -> String {
-                stringify!(#function).to_owned()
+                stringify!(#new_function).to_owned()
             }
         }
     }

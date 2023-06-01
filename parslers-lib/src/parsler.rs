@@ -1,31 +1,60 @@
-use std::process::Output;
-use std::{any::Any, collections::HashMap, hash::Hasher, marker::PhantomData, rc::Rc, str::Chars};
+use std::any::Any;
+use std::collections::HashMap;
+use std::{hash::Hasher, marker::PhantomData, rc::Rc, str::Chars};
 
+use std::cmp::Eq;
 use std::hash::Hash;
 
 use either::Either;
 use parslers_macro::reflect;
 
 use crate::ast::AnalysedParser;
+use crate::reflect;
 use crate::{
-    ast::{self, Spec},
+    ast::{self},
     code_gen::CompileContext,
     reflect::Reflect,
 };
 
-// impl std::hash::Hash for dyn DynHashable {
-//     fn hash<H>(&self, state: &mut H)
-//     where
-//         H: Hasher,
-//     {
-//         // let unboxed_ref = &(*self) as &dyn Parsler<Output = T>;
-//         self.dyn_hash(state)
-//     }
-// }
+impl std::hash::Hash for dyn DynHashable {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        // let unboxed_ref = &(*self) as &dyn Parsler<Output = T>;
+        self.dyn_hash(state)
+    }
+}
 
 pub trait DynHashable {
     fn dyn_hash(&self, hasher: &mut dyn Hasher);
 }
+
+impl<H: Hash + ?Sized> DynHashable for H {
+    fn dyn_hash(&self, mut state: &mut dyn Hasher) {
+        self.hash(&mut state);
+    }
+}
+
+impl<T> Hash for dyn Parsler<Output = T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.dyn_hash(state);
+    }
+}
+
+// pub trait DynPartialEq {
+//     fn dyn_eq(&self, other: &dyn DynPartialEq) -> bool;
+// }
+
+// impl<T: std::cmp::PartialEq + ?Sized + 'static> DynPartialEq for T {
+//     fn dyn_eq(&self, other: &dyn DynPartialEq) -> bool {
+//         if let Some(other) = other.downcast_ref::<Self>() {
+//             self == other
+//         } else {
+//             false
+//         }
+//     }
+// }
 
 pub trait Parsler: DynHashable {
     type Output;
@@ -33,11 +62,11 @@ pub trait Parsler: DynHashable {
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String>;
     fn compile(&self, info: &mut CompileContext) -> ast::Parser;
 
-    fn ap<B, F, P>(self, p: P) -> Ap<B, F, Self, P>
+    fn ap<B, C, P>(self, p: P) -> Ap<C, Self::Output, P, Self>
     where
         Self: Sized,
-        P: Parsler<Output = F>,
-        F: FnOnce(Self::Output) -> B,
+        Self::Output: FnOnce(B) -> C,
+        P: Parsler<Output = B>,
     {
         Ap(self, p)
     }
@@ -96,14 +125,32 @@ pub trait Parsler: DynHashable {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LazyParser<P: Parsler, F: FnOnce() -> P + Clone>(std::cell::OnceCell<P>, F);
+pub fn name<P: Parsler + 'static>(
+    name: &str,
+    f: impl FnOnce() -> P + Clone + 'static,
+) -> Rc<dyn Parsler<Output = P::Output>> {
+    Rc::new(NamedParser(LazyParser::new(f), name.to_owned()))
+}
+
+#[derive(Clone, Debug)]
+pub struct LazyParser<P, F>(std::cell::OnceCell<P>, F)
+where
+    P: Parsler,
+    F: FnOnce() -> P + Clone;
 
 impl<P: Parsler, F: FnOnce() -> P + Clone> LazyParser<P, F> {
     pub fn new(f: F) -> Self {
         Self(std::cell::OnceCell::new(), f)
     }
 }
+
+// impl<P: Parsler, F: FnOnce() -> P + Clone> Eq for LazyParser<P, F> {}
+
+// impl<P: Parsler, F: FnOnce() -> P + Clone> PartialEq for LazyParser<P, F> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0 && self.1 == other.1
+//     }
+// }
 
 impl<P: Parsler, F: FnOnce() -> P + Clone> Hash for LazyParser<P, F> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -115,7 +162,6 @@ impl<P: Parsler, F: FnOnce() -> P + Clone> Parsler for LazyParser<P, F> {
     type Output = P::Output;
 
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
-        // println!("Here we are! {}", input.as_str());
         self.0.get_or_init(self.1.clone()).parse(input)
     }
 
@@ -124,7 +170,7 @@ impl<P: Parsler, F: FnOnce() -> P + Clone> Parsler for LazyParser<P, F> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Satisfy<F: FnOnce(char) -> bool + Reflect + Clone>(pub F);
 
 impl<F: FnOnce(char) -> bool + Reflect + Clone> Hash for Satisfy<F> {
@@ -132,6 +178,14 @@ impl<F: FnOnce(char) -> bool + Reflect + Clone> Hash for Satisfy<F> {
         self.0.reflect().hash(state);
     }
 }
+
+// impl<F: FnOnce(char) -> bool + Reflect + Clone> Eq for Satisfy<F> {}
+
+// impl<F: FnOnce(char) -> bool + Reflect + Clone> PartialEq for Satisfy<F> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0
+//     }
+// }
 
 impl<F: FnOnce(char) -> bool + Reflect + Clone> Parsler for Satisfy<F> {
     type Output = char;
@@ -153,7 +207,7 @@ impl<F: FnOnce(char) -> bool + Reflect + Clone> Parsler for Satisfy<F> {
 }
 
 #[derive(Debug)]
-pub struct Ap<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>>(pub P1, pub P2);
+pub struct Ap<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>>(pub P2, pub P1);
 
 impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler + Clone, P2: Parsler<Output = F> + Clone> Clone
     for Ap<B, F, P1, P2>
@@ -162,6 +216,16 @@ impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler + Clone, P2: Parsler<Output = F>
         Self(self.0.clone(), self.1.clone())
     }
 }
+
+// impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Eq for Ap<B, F, P1, P2> {}
+
+// impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> PartialEq
+//     for Ap<B, F, P1, P2>
+// {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0
+//     }
+// }
 
 impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Hash
     for Ap<B, F, P1, P2>
@@ -177,14 +241,14 @@ impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Parsle
 {
     type Output = B;
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
-        let f = self.1.parse(input)?;
-        let a = self.0.parse(input)?;
+        let f = self.0.parse(input)?;
+        let a = self.1.parse(input)?;
         Ok(f(a))
     }
 
     fn compile(&self, info: &mut CompileContext) -> ast::Parser {
-        let left = self.0.compile(info);
-        let right = self.1.compile(info);
+        let left = self.1.compile(info);
+        let right = self.0.compile(info);
 
         ast::Parser::Ap(
             Box::new(AnalysedParser::new(left)),
@@ -201,6 +265,14 @@ impl<B, P1: Parsler + Clone, F: FnOnce(P1::Output) -> B + Clone + Reflect> Clone
         Self(self.0.clone(), self.1.clone())
     }
 }
+
+// impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> Eq for Map<B, P1, F> {}
+
+// impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> PartialEq for Map<B, P1, F> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0
+//     }
+// }
 
 impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> Hash for Map<B, P1, F> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -229,7 +301,7 @@ impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> Parsler for M
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Then<P1: Parsler, P2: Parsler>(pub P1, pub P2);
 
 impl<P1: Parsler, P2: Parsler> Hash for Then<P1, P2> {
@@ -238,6 +310,14 @@ impl<P1: Parsler, P2: Parsler> Hash for Then<P1, P2> {
         self.1.dyn_hash(state);
     }
 }
+
+// impl<P1: Parsler, P2: Parsler> Eq for Then<P1, P2> {}
+
+// impl<P1: Parsler, P2: Parsler> PartialEq for Then<P1, P2> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0 && self.1 == other.1
+//     }
+// }
 
 impl<P1: Parsler, P2: Parsler> Parsler for Then<P1, P2> {
     type Output = P2::Output;
@@ -258,7 +338,7 @@ impl<P1: Parsler, P2: Parsler> Parsler for Then<P1, P2> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Before<P1: Parsler, P2: Parsler>(pub P1, pub P2);
 
 impl<P1: Parsler, P2: Parsler> Hash for Before<P1, P2> {
@@ -267,6 +347,14 @@ impl<P1: Parsler, P2: Parsler> Hash for Before<P1, P2> {
         self.1.dyn_hash(state);
     }
 }
+
+// impl<P1: Parsler, P2: Parsler> Eq for Before<P1, P2> {}
+
+// impl<P1: Parsler, P2: Parsler> PartialEq for Before<P1, P2> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0 && self.1 == other.1
+//     }
+// }
 
 impl<P1: Parsler, P2: Parsler> Parsler for Before<P1, P2> {
     type Output = P1::Output;
@@ -287,7 +375,7 @@ impl<P1: Parsler, P2: Parsler> Parsler for Before<P1, P2> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Or<P1: Parsler, P2: Parsler<Output = P1::Output>>(pub P1, pub P2);
 
 impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Hash for Or<P1, P2> {
@@ -296,6 +384,14 @@ impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Hash for Or<P1, P2> {
         self.1.dyn_hash(state);
     }
 }
+
+// impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Eq for Or<P1, P2> {}
+
+// impl<P1: Parsler, P2: Parsler<Output = P1::Output>> PartialEq for Or<P1, P2> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0 && self.1 == other.1
+//     }
+// }
 
 impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Parsler for Or<P1, P2> {
     type Output = P1::Output;
@@ -317,7 +413,7 @@ impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Parsler for Or<P1, P2> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Branch<
     L,
     R,
@@ -363,6 +459,35 @@ impl<
     }
 }
 
+// impl<
+//         L,
+//         R,
+//         O,
+//         F1: FnOnce(L) -> O + Reflect,
+//         F2: FnOnce(R) -> O + Reflect,
+//         P1: Parsler<Output = Either<L, R>>,
+//         P2: Parsler<Output = F1>,
+//         P3: Parsler<Output = F2>,
+//     > PartialEq for Branch<L, R, O, F1, F2, P1, P2, P3>
+// {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0 && self.1 == other.1 && self.2 == other.2
+//     }
+// }
+
+// impl<
+//         L,
+//         R,
+//         O,
+//         F1: FnOnce(L) -> O + Reflect,
+//         F2: FnOnce(R) -> O + Reflect,
+//         P1: Parsler<Output = Either<L, R>>,
+//         P2: Parsler<Output = F1>,
+//         P3: Parsler<Output = F2>,
+//     > Eq for Branch<L, R, O, F1, F2, P1, P2, P3>
+// {
+// }
+
 impl<
         L,
         R,
@@ -395,7 +520,7 @@ impl<
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Empty<O>(pub PhantomData<O>);
 
 impl<O> Clone for Empty<O> {
@@ -416,6 +541,14 @@ impl<O> Hash for Empty<O> {
     }
 }
 
+// impl<O> Eq for Empty<O> {}
+
+// impl<O> PartialEq for Empty<O> {
+//     fn eq(&self, _other: &Self) -> bool {
+//         true
+//     }
+// }
+
 impl<O> Parsler for Empty<O> {
     type Output = O;
     fn parse(&self, _input: &mut Chars) -> Result<Self::Output, String> {
@@ -427,7 +560,7 @@ impl<O> Parsler for Empty<O> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Attempt<P1: Parsler>(pub P1);
 
 impl<P1: Parsler> Hash for Attempt<P1> {
@@ -435,6 +568,14 @@ impl<P1: Parsler> Hash for Attempt<P1> {
         self.0.dyn_hash(state);
     }
 }
+
+// impl<P1: Parsler> Eq for Attempt<P1> {}
+
+// impl<P1: Parsler> PartialEq for Attempt<P1> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0
+//     }
+// }
 
 impl<P1: Parsler> Parsler for Attempt<P1> {
     type Output = P1::Output;
@@ -461,6 +602,14 @@ impl<P1: Parsler> Hash for Look<P1> {
     }
 }
 
+// impl<P1: Parsler> Eq for Look<P1> {}
+
+// impl<P1: Parsler> PartialEq for Look<P1> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0
+//     }
+// }
+
 impl<P1: Parsler> Parsler for Look<P1> {
     type Output = P1::Output;
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
@@ -482,6 +631,14 @@ impl<P1: Parsler> Hash for NegLook<P1> {
     }
 }
 
+// impl<P1: Parsler> Eq for NegLook<P1> {}
+
+// impl<P1: Parsler> PartialEq for NegLook<P1> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0
+//     }
+// }
+
 impl<P1: Parsler<Output = ()>> Parsler for NegLook<P1> {
     type Output = ();
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
@@ -497,7 +654,7 @@ impl<P1: Parsler<Output = ()>> Parsler for NegLook<P1> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Pure<A: Reflect>(pub A);
 
 impl<A: Reflect> Hash for Pure<A> {
@@ -505,6 +662,14 @@ impl<A: Reflect> Hash for Pure<A> {
         self.0.reflect().hash(state);
     }
 }
+
+// impl<A: Reflect> Eq for Pure<A> {}
+
+// impl<A: Reflect> PartialEq for Pure<A> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0.reflect() == other.0.reflect()
+//     }
+// }
 
 impl<A: Clone + Reflect> Parsler for Pure<A> {
     type Output = A;
@@ -527,17 +692,33 @@ pub fn pure<A: Reflect>(a: A) -> Pure<A> {
     Pure(a)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct NamedParser<P: Parsler>(pub P, pub String);
 
-impl<P: Parsler + Hash> Hash for NamedParser<P> {
+impl<P: Parsler> Hash for NamedParser<P> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.dyn_hash(state);
         self.1.dyn_hash(state)
     }
 }
 
-impl<P: Parsler + Hash> Parsler for NamedParser<P> {
+// impl<P: Parsler> Eq for NamedParser<P> {}
+
+// impl<P: Parsler> PartialEq for NamedParser<P> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0.dyn_eq(&other.0) && self.1 == other.1
+//     }
+// }
+
+fn hash(h: impl Hash) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    h.hash(&mut hasher);
+    hasher.finish()
+}
+
+use crate::code_gen::NamedParserStatus;
+
+impl<P: Parsler> Parsler for NamedParser<P> {
     type Output = P::Output;
 
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
@@ -545,12 +726,11 @@ impl<P: Parsler + Hash> Parsler for NamedParser<P> {
     }
 
     fn compile(&self, info: &mut CompileContext) -> ast::Parser {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.hash(&mut hasher);
-        let name = format!("{}_{}", self.1, hasher.finish());
+        let hash = hash(self);
+        let name = format!("{}_{}", self.1, hash);
         match info.register_parser(&name) {
-            Some(_) => ast::Parser::Ident(name),
-            None => {
+            NamedParserStatus::Registered => ast::Parser::Ident(name),
+            NamedParserStatus::Unregistered => {
                 let p = self.0.compile(info);
                 info.insert_parser::<P>(&name, p.clone());
                 ast::Parser::Ident(name)
@@ -559,22 +739,42 @@ impl<P: Parsler + Hash> Parsler for NamedParser<P> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Loop<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler>(P0, PN);
+#[derive(Clone, Debug)]
+pub struct Loop<F, P0, PN>(pub P0, pub PN)
+where
+    F: FnOnce(P0::Output) -> P0::Output,
+    P0: Parsler,
+    PN: Parsler<Output = F>;
 
-impl<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler> Hash for Loop<P0, PN> {
+impl<F: FnOnce(P0::Output) -> P0::Output, P0: Parsler, PN: Parsler<Output = F>> Hash
+    for Loop<F, P0, PN>
+{
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.dyn_hash(state);
+        self.1.dyn_hash(state);
     }
 }
 
-impl<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler> Parsler for Loop<P0, PN> {
-    type Output = Vec<PN::Output>;
+// impl<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler> Eq for Loop<P0, PN> {}
+
+// impl<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler> PartialEq for Loop<P0, PN> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0 == other.0 && self.1 == other.1
+//     }
+// }
+
+impl<F, P0, PN> Parsler for Loop<F, P0, PN>
+where
+    F: FnOnce(P0::Output) -> P0::Output,
+    P0: Parsler,
+    PN: Parsler<Output = F>,
+{
+    type Output = P0::Output;
 
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
         let mut v = self.0.parse(input)?;
         while let Ok(a) = self.1.parse(input) {
-            v.push(a);
+            v = a(v);
         }
         Ok(v)
     }
@@ -589,7 +789,7 @@ impl<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler> Parsler for Loop<P0, PN
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Recognise<P: Parsler>(pub P);
 
 impl<P: Parsler> Hash for Recognise<P> {
@@ -597,6 +797,14 @@ impl<P: Parsler> Hash for Recognise<P> {
         self.0.dyn_hash(state);
     }
 }
+
+// impl<P: Parsler> Eq for Recognise<P> {}
+
+// impl<P: Parsler> PartialEq for Recognise<P> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.0.dyn_eq(&other.0)
+//     }
+// }
 
 impl<P: Parsler> Parsler for Recognise<P> {
     type Output = String;
@@ -613,19 +821,7 @@ impl<P: Parsler> Parsler for Recognise<P> {
     }
 }
 
-impl<H: Hash + ?Sized> DynHashable for H {
-    fn dyn_hash(&self, mut state: &mut dyn Hasher) {
-        self.hash(&mut state);
-    }
-}
-
-impl<T> Hash for dyn Parsler<Output = T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.dyn_hash(state);
-    }
-}
-
-impl<P: Parsler + Hash + ?Sized> Parsler for Box<P> {
+impl<P: Parsler + ?Sized + Hash> Parsler for Box<P> {
     type Output = P::Output;
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
         self.as_ref().parse(input)
@@ -636,7 +832,7 @@ impl<P: Parsler + Hash + ?Sized> Parsler for Box<P> {
     }
 }
 
-impl<P: Parsler + Hash + ?Sized> Parsler for Rc<P> {
+impl<P: Parsler + ?Sized + Hash> Parsler for Rc<P> {
     type Output = P::Output;
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
         self.as_ref().parse(input)
@@ -648,19 +844,49 @@ impl<P: Parsler + Hash + ?Sized> Parsler for Rc<P> {
 }
 
 #[reflect]
-pub fn cons<A: 'static>(a: A) -> Box<dyn FnOnce(Vec<A>) -> Vec<A>> {
-    Box::new(move |mut v| {
+pub fn cons<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
+    move |mut v| {
         v.push(a);
         v
-    })
+    }
 }
 
 #[reflect]
-fn append<A: 'static>(mut v: Vec<A>) -> Box<dyn FnOnce(A) -> Vec<A>> {
-    Box::new(move |a| {
+pub fn append<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
+    move |mut v| {
         v.push(a);
         v
-    })
+    }
+}
+
+// #[reflect]
+// pub fn append_fn<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
+//     move |mut v| {
+//         v.push(a);
+//         v
+//     }
+// }
+
+#[reflect]
+pub fn insert<A: 'static + Eq + std::hash::Hash, B: 'static>(
+    a: (A, B),
+) -> impl FnOnce(std::collections::HashMap<A, B>) -> std::collections::HashMap<A, B> {
+    move |mut v| {
+        v.insert(a.0, a.1);
+        v
+    }
+}
+
+#[reflect]
+pub fn insert_opt<A: 'static + Eq + std::hash::Hash, B: 'static>(
+    mut v: std::collections::HashMap<A, B>,
+) -> impl FnOnce(Option<(A, B)>) -> std::collections::HashMap<A, B> {
+    move |mut a| {
+        if let Some(a) = a {
+            v.insert(a.0, a.1);
+        }
+        v
+    }
 }
 
 #[reflect]
@@ -669,11 +895,11 @@ fn singleton<A>(a: A) -> Vec<A> {
 }
 
 #[reflect]
-fn concat<A: 'static>(mut v: Vec<A>) -> Box<dyn FnOnce(Vec<A>) -> Vec<A>> {
-    Box::new(move |mut a| {
+fn concat<A: 'static>(mut v: Vec<A>) -> impl FnOnce(Vec<A>) -> Vec<A> {
+    move |mut a| {
         v.append(&mut a);
         v
-    })
+    }
 }
 
 #[reflect]
@@ -683,52 +909,75 @@ fn reverse<A>(mut v: Vec<A>) -> Vec<A> {
     // v.into_iter().rev().collect()
 }
 
-pub fn some_rev<P: Parsler + Clone + 'static>(p: P) -> impl Parsler<Output = Vec<P::Output>> + Clone
+pub fn some_rev<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
 where
+    P: Parsler + Clone + 'static,
     P::Output: Clone + 'static + Reflect,
 {
-    let clone_p = p.clone();
-    NamedParser(
-        LazyParser::new(|| many_rev(p)).ap(clone_p.map(cons)),
-        "some_rev".to_owned(),
-    )
-    // .map(reverse)
+    name("some_rev", || p.clone().map(append).ap(many_rev(p)))
 }
 
-pub fn many_rev<P: Parsler + Clone + 'static>(p: P) -> impl Parsler<Output = Vec<P::Output>> + Clone
+pub fn many_rev<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
 where
+    P: Parsler + Clone + 'static,
     P::Output: Clone + 'static + Reflect,
 {
-    NamedParser(
-        LazyParser::new(|| {
-            Rc::new(some_rev(p)) as Rc<dyn Parsler<Output = Vec<P::Output>> + 'static>
-        })
-        .or(pure(vec![])),
-        "many_rev".to_owned(),
-    )
+    name("many_rev", || some_rev(p).or(pure(vec![])))
 }
 
-pub fn many<P: Parsler + Clone + 'static>(p: P) -> impl Parsler<Output = Vec<P::Output>> + Clone
+pub fn many<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
 where
+    P: Parsler + Clone + 'static,
     P::Output: Clone + 'static + Reflect,
 {
-    Loop(pure(vec![]), p)
+    dynamic(Loop(pure(vec![]), Map(p, append)))
 }
 
-#[reflect]
-fn check_one<A>(a: Vec<A>) -> either::Either<Vec<A>, ()> {
-    if a.len() != 0 {
-        either::Either::Left(a)
-    } else {
-        either::Either::Right(())
+pub trait IntoPair<A, B> {
+    fn into_pair(self) -> (A, B);
+}
+
+impl<A, B> IntoPair<A, B> for (A, B) {
+    fn into_pair(self) -> (A, B) {
+        self
     }
 }
 
-pub fn some<P: Parsler + Clone + 'static>(p: P) -> impl Parsler<Output = Vec<P::Output>> + Clone
+pub fn many_map<
+    A: Clone + 'static + Reflect + Eq + Hash,
+    B: Clone + 'static + Reflect,
+    P: Parsler<Output = (A, B)> + Clone + 'static,
+>(
+    p: P,
+) -> impl Parsler<Output = HashMap<A, B>> + Clone {
+    dynamic(Loop(pure(HashMap::new()), Map(p, insert)))
+}
+
+pub fn some<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
 where
-    P::Output: Clone + 'static + Reflect,
+    P: Parsler + Clone + 'static,
+    P::Output: Clone + 'static,
 {
-    Loop(p.clone().map(singleton), p)
+    dynamic(Loop(p.clone().map(singleton), pure(append).ap(p)))
+}
+
+#[reflect]
+fn singleton_map<A: 'static + Eq + std::hash::Hash, B: 'static>(
+    a: (A, B),
+) -> std::collections::HashMap<A, B> {
+    let mut m = HashMap::new();
+    m.insert(a.0, a.1);
+    m
+}
+
+pub fn some_map<
+    A: Clone + 'static + Reflect + Eq + Hash,
+    B: Clone + 'static + Reflect,
+    P: Parsler<Output = (A, B)> + Clone + 'static,
+>(
+    p: P,
+) -> impl Parsler<Output = HashMap<A, B>> + Clone {
+    dynamic(Loop(p.clone().map(singleton_map), Map(p, insert)))
 }
 
 pub fn match_char(c: char) -> impl Parsler<Output = char> + Clone {
@@ -739,7 +988,7 @@ pub fn match_char(c: char) -> impl Parsler<Output = char> + Clone {
             "match_char"
         }
         fn reflect(&self) -> String {
-            format!("fn match_char(a: char) -> bool {{ a == '{}'}}", self.0)
+            format!("fn match_char(a: char) -> bool {{ a == {:?}}}", self.0)
         }
     }
 
@@ -842,7 +1091,7 @@ pub fn filtered_by<P: Parsler + Clone, F: FnOnce(&P::Output) -> bool + Reflect +
     }
 
     Branch(
-        Ap(p, pure(Cond(f, PhantomData))),
+        Ap(pure(Cond(f, PhantomData)), p),
         Empty::<emty<P::Output>>::default(),
         pure(id),
     )
@@ -896,8 +1145,15 @@ pub fn opt(p: impl Parsler + Clone) -> impl Parsler<Output = ()> + Clone {
     Or(p.then(pure(())), pure(()))
 }
 
-pub fn ws() -> impl Parsler<Output = Vec<char>> + Clone {
-    some(one_of(" \t\n\r".chars()))
+pub fn ws<P: Parsler + Clone>(p: P) -> impl Parsler<Output = P::Output> + Clone {
+    p.before(many(one_of(" \t\n\r".chars())))
+}
+
+pub fn dynamic<P>(p: P) -> Rc<dyn Parsler<Output = P::Output>>
+where
+    P: Parsler + 'static,
+{
+    Rc::new(p)
 }
 
 #[cfg(test)]

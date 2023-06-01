@@ -5,11 +5,13 @@ members = [
     "parslers-lib",
     "test-site",
     "parslers-json",
-    "parslers-benchmark"
+    "parslers-benchmark",
+    "parslers-branflakes"
 ]
 
 [profile.release]
-# strip = true
-# lto = true
-# panic = "abort"
-debug = 1
+strip = true
+lto = true
+panic = "abort"
+# debug = 1
+# codegen-units = 1

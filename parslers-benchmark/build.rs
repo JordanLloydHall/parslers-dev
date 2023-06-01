@@ -1,20 +1,21 @@
-#![feature(unboxed_closures, fn_traits, type_name_of_val, lazy_cell)]
-use std::collections::HashMap;
-use std::io::Write;
-use std::process::Command;
-use std::process::Output;
-use std::process::Stdio;
+#![feature(
+    unboxed_closures,
+    fn_traits,
+    type_name_of_val,
+    lazy_cell,
+    impl_trait_in_fn_trait_return,
+    return_position_impl_trait_in_trait,
+    impl_trait_in_assoc_type
+)]
+
 use std::rc::Rc;
 
+use parslers_branflakes::Brainfuck;
+use parslers_json::Json;
 // use parslers_json::parslers_json::Json;
 use parslers_lib::parsler::*;
 use parslers_lib::reflect::*;
 use parslers_macro::reflect;
-
-#[reflect]
-fn is_a(a: &char) -> bool {
-    a == &'a'
-}
 
 #[reflect]
 fn json_bool(b: bool) -> parslers_json::Json {
@@ -37,42 +38,35 @@ fn json_array(a: Vec<parslers_json::Json>) -> parslers_json::Json {
 }
 
 #[reflect]
-fn json_object(a: Vec<(String, parslers_json::Json)>) -> parslers_json::Json {
-    parslers_json::Json::Object(a.into_iter().collect())
+fn json_object(a: std::collections::HashMap<String, parslers_json::Json>) -> parslers_json::Json {
+    parslers_json::Json::Object(a)
 }
 
 #[reflect]
-fn object_unzip(
-    (a, b): (parslers_json::Json, parslers_json::Json),
-) -> (String, parslers_json::Json) {
-    match a {
-        parslers_json::Json::String(s) => (s, b),
-        _ => unreachable!(),
-    }
-}
-
-#[reflect]
-fn zip<A: 'static>(a: A) -> Box<dyn FnOnce(A) -> (A, A)> {
+fn zip(a: String) -> Box<dyn FnOnce(parslers_json::Json) -> (String, parslers_json::Json)> {
     Box::new(move |b| (a, b))
 }
 
 #[reflect]
 fn parse_double(s: String) -> f64 {
-    s.parse::<f64>().unwrap()
+    fast_float::parse(s).unwrap()
+}
+
+#[reflect]
+fn digit(c: char) -> bool {
+    ('0'..='9').contains(&c)
+}
+
+#[reflect]
+fn digit19(c: char) -> bool {
+    ('1'..='9').contains(&c)
 }
 
 fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
-    (Rc::new(LazyParser::new(|| json().map(singleton).or(pure(vec![]))))
-        as Rc<dyn Parsler<Output = Vec<parslers_json::Json>>>)
-        .ap(match_char('[').attempt().then(
-            many(
-                (Rc::new(LazyParser::new(|| json()))
-                    as Rc<dyn Parsler<Output = parslers_json::Json>>)
-                    .before(opt(match_char(',').attempt())),
-            )
-            .map(concat),
-        ))
-        .before(match_char(']'))
+    ws(match_char('[').attempt())
+        .then(many(json().before(opt(ws(match_char(',').attempt())))).map(append))
+        .ap(json().map(option).or(pure(None)))
+        .before(ws(match_char(']')))
         .map(json_array)
 }
 
@@ -80,118 +74,175 @@ fn string() -> impl Parsler<Output = String> + Clone {
     match_char('\"')
         .attempt()
         .then(Recognise(many(not('\"').attempt())))
-        .before(match_char('\"'))
+        .before(ws(match_char('\"')))
 }
 
 fn object_item() -> impl Parsler<Output = (String, parslers_json::Json)> + Clone {
-    (Rc::new(LazyParser::new(|| json())) as Rc<dyn Parsler<Output = parslers_json::Json>>)
-        .ap(string().map(json_string).before(match_char(':')).map(zip))
-        .map(object_unzip)
+    string().before(ws(match_char(':'))).map(zip).ap(json())
+}
+
+#[reflect]
+pub fn append<A: 'static>(mut v: Vec<A>) -> impl FnOnce(Option<A>) -> Vec<A> {
+    move |mut a| {
+        if let Some(a) = a.take() {
+            v.push(a);
+        }
+        v
+    }
+}
+
+#[reflect]
+pub fn option<A>(a: A) -> Option<A> {
+    Some(a)
+}
+
+fn number() -> impl Parsler<Output = f64> + Clone {
+    Recognise(
+        opt(match_char('-').attempt())
+            .then(
+                match_char('0').attempt().then(pure(())).or(Satisfy(digit19)
+                    .attempt()
+                    .then(many(Satisfy(digit).attempt()))
+                    .then(pure(()))),
+            )
+            .then(opt(match_char('.')
+                .attempt()
+                .then(many(Satisfy(digit).attempt()))))
+            .then(opt(match_char('e')
+                .attempt()
+                .or(match_char('E').attempt())
+                .then(opt(match_char('-').attempt().or(match_char('+').attempt())))
+                .then(many(Satisfy(digit).attempt())))),
+    )
+    .map(parse_double)
+}
+
+#[reflect]
+fn parse_usize(s: String) -> usize {
+    s.parse().unwrap()
+}
+fn uint() -> impl Parsler<Output = usize> + Clone {
+    Recognise(many(Satisfy(digit))).map(parse_usize)
 }
 
 fn object() -> impl Parsler<Output = parslers_json::Json> + Clone {
-    (object_item())
-        .map(singleton)
-        .or(pure(vec![]))
-        .ap(match_char('{').attempt().then(
-            many((object_item()).before(match_char(',').attempt().or(pure(' ')))).map(concat),
-        ))
-        .before(match_char('}'))
+    ws(match_char('{').attempt())
+        .then(many_map((object_item()).before(opt(ws(match_char(',').attempt())))).map(insert_opt))
+        .ap(object_item().map(option).or(pure(None)))
+        .before(ws(match_char('}')))
         .map(json_object)
 }
 
 fn json() -> impl Parsler<Output = parslers_json::Json> + Clone {
-    let boolean = tag("true")
-        .attempt()
+    let boolean = ws(tag("true").attempt())
         .then(pure(true))
-        .or(tag("false").attempt().then(pure(false)))
+        .or(ws(tag("false").attempt()).then(pure(false)))
         .map(json_bool);
 
-    let null = tag("null").attempt().then(pure(parslers_json::Json::Null));
+    let null = ws(tag("null").attempt()).then(pure(parslers_json::Json::Null));
 
-    let number = Recognise(
-        opt(match_char('-').attempt())
-            .then(some(one_of('0'..='9')))
-            .then(opt(match_char('.').attempt().then(many(one_of('0'..='9'))))),
-    )
-    .map(parse_double)
-    .map(json_number);
+    let number = ws(number()).map(json_number);
 
-    NamedParser(
+    name("json", || {
         null.or(boolean)
             .or(string().map(json_string))
             .or(number)
             .or(array())
-            .or(object()),
-        "json".to_owned(),
-    )
+            .or(object())
+    })
 }
 
-// mod hello {
-//     fn some_rev_1146231101952406494(
-//         input: &mut std::str::Chars,
-//     ) -> Result<alloc::vec::Vec<char>, &'static str> {
-//         { { Ok (f14) } . and_then (| f | { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f19) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('0') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f20) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('1') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f21) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('2') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f22) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('3') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f23) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('4') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f24) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('5') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f25) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('6') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f26) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('7') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let result = { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f27) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('8') }) } ; if result . is_err () { * input = copied_input ; } result } ; if result . is_ok () { result } else { { let copied_input = input . clone () ; let result = { { input . next () . ok_or ("Found EOF when character was expected") . and_then (| c | if (f28) (c) { Ok (c) } else { Err ("expected a specific character") }) } . and_then (| _ | { Ok ('9') }) } ; if result . is_err () { * input = copied_input ; } result } } } } } } } } } } } } } } } } } } } . map (| x | f (x))) } . and_then (| f | { many_rev_17877461323594952870 (input) } . map (| x | f (x)))
-//     }
-// }
+#[reflect]
+fn brainfuck_val(p: Vec<parslers_branflakes::Brainfuck>) -> parslers_branflakes::BrainfuckProgram {
+    parslers_branflakes::BrainfuckProgram(p)
+}
+#[reflect]
+fn brainfuck_loop(p: parslers_branflakes::BrainfuckProgram) -> parslers_branflakes::Brainfuck {
+    parslers_branflakes::Brainfuck::Loop(p)
+}
+
+fn brainfuck_program() -> impl Parsler<Output = parslers_branflakes::BrainfuckProgram> + Clone {
+    let left = match_char('<').attempt().then(pure(Brainfuck::Left));
+    let right = match_char('>').attempt().then(pure(Brainfuck::Right));
+    let add = match_char('+').attempt().then(pure(Brainfuck::Add));
+    let sub = match_char('-').attempt().then(pure(Brainfuck::Sub));
+    let print = match_char('.').attempt().then(pure(Brainfuck::Print));
+    let read = match_char(',').attempt().then(pure(Brainfuck::Read));
+    let loop_ = || {
+        match_char('[')
+            .attempt()
+            .then(brainfuck_program())
+            .map(brainfuck_loop)
+            .before(match_char(']'))
+    };
+    name("brainfuck", move || {
+        many(
+            left.or(right)
+                .or(add)
+                .or(sub)
+                .or(print)
+                .or(read)
+                .or(loop_()),
+        )
+        .map(brainfuck_val)
+    })
+}
+
+fn some_a() -> impl Parsler<Output = ()> + Clone {
+    name("some_a", || match_char('a').then(opt(some_a())))
+}
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
 
-    // let json = json();
-
-    // let number = match_char('.')
-    //     .attempt()
-    //     .then(many(one_of('0'..='9')))
-    //     .or(pure(vec![]))
-    //     .ap(some(one_of('0'..='9'))
-    //         .ap(match_char('-')
-    //             .attempt()
-    //             .or(pure('0'))
-    //             .map(singleton)
-    //             .map(concat))
-    //         .map(zip))
-    //     .map(parse_double)
-    //     .map(json_number)
-
-    // let null_or_bool_or_num = null.or(boolean).or(number);
-
-    // let non_recurse = number.or(string);
-
-    // let input = "[1,2,3,4,5]";
-
-    // println!("{}, {:?}", input, json.parse(&mut input.chars()).unwrap());
-
-    // let filt = filtered_by(one_of('a'..='b'), is_a);
-
-    // let number = Recognise(
-    //     opt(match_char('-').attempt())
-    //         .then(some(one_of('0'..='9')))
-    //         .then(opt(match_char('.').attempt().then(many(one_of('0'..='9')))));
-
     let context = &mut parslers_lib::code_gen::CompileContext::new();
 
-    let mut p = parslers_lib::code_gen::compile("hello", json(), context);
+    let mut p = parslers_lib::code_gen::compile("json", json(), context);
+    let mut p_validate =
+        parslers_lib::code_gen::compile("json_validate", json().then(pure(())), context);
+
+    let mut brainfuck = parslers_lib::code_gen::compile("brainfuck", brainfuck_program(), context);
+    let mut brainfuck_validate = parslers_lib::code_gen::compile(
+        "brainfuck_validate",
+        brainfuck_program().then(pure(())),
+        context,
+    );
+
+    // let test = pure("1.2344".to_owned()).map(parse_double).map(singleton);
+
+    // let mut test = parslers_lib::code_gen::compile("test", test, context);
+
+    // test.parser = test.parser.reduce_down();
+
+    p.parser = p.parser.reduce();
+    p.parser
+        .output_used_analysis(true, &mut context.parsers_with_unused);
+
+    p_validate.parser = p_validate.parser.reduce();
+    p_validate
+        .parser
+        .output_used_analysis(true, &mut context.parsers_with_unused);
+
+    brainfuck.parser = brainfuck.parser.reduce();
+    brainfuck
+        .parser
+        .output_used_analysis(true, &mut context.parsers_with_unused);
+
+    brainfuck_validate
+        .parser
+        .output_used_analysis(true, &mut context.parsers_with_unused);
+    brainfuck_validate.parser = brainfuck_validate.parser.reduce();
 
     context.optimise_named_parsers();
 
-    eprintln!("{:#?}", context.parsers_with_unused);
+    let parslers_out = parslers_lib::code_gen::gen_statement(
+        &[p, p_validate, brainfuck, brainfuck_validate],
+        context,
+    )
+    .to_string();
 
-    // eprintln!(
-    //     "{:#?}",
-    //     context
-    //         .named_parsers
-    //         .get("many_rev_17877461323594952870_unused")
-    //         .unwrap()
-    //         .as_ref()
-    //         .unwrap()
-    //         .parser
-    // );
+    // wow
 
-    // p.parser = parslers_lib::ast::optimise(p.parser);
-
-    let parslers_out = parslers_lib::code_gen::gen_statement(p, context).to_string();
-
-    // Write the combinators file to the output directory
+    // Write the combinators file to the output directoryas
     std::fs::write(format!("{}/combinators.rs", out_dir), parslers_out).unwrap();
 }

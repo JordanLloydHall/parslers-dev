@@ -8,6 +8,12 @@ pub trait Reflect {
     fn reflect(&self) -> String;
 }
 
+impl Reflect for Box<dyn Reflect> {
+    fn reflect(&self) -> String {
+        format!("Box::new({})", self.as_ref().reflect())
+    }
+}
+
 impl Reflect for char {
     fn reflect(&self) -> String {
         format!("'{}'", self)
