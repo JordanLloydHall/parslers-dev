@@ -63,8 +63,8 @@ fn digit19(c: char) -> bool {
 }
 
 fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
-    ws(match_char('[').attempt())
-        .then(many(json().before(opt(ws(match_char(',').attempt())))).map(append))
+    ws(match_char('['))
+        .then(many(json().before(opt(ws(match_char(','))))).map(append))
         .ap(json().map(option).or(pure(None)))
         .before(ws(match_char(']')))
         .map(json_array)
@@ -72,8 +72,7 @@ fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
 
 fn string() -> impl Parsler<Output = String> + Clone {
     match_char('\"')
-        .attempt()
-        .then(Recognise(many(not('\"').attempt())))
+        .then(Recognise(many(not('\"'))))
         .before(ws(match_char('\"')))
 }
 
@@ -98,21 +97,17 @@ pub fn option<A>(a: A) -> Option<A> {
 
 fn number() -> impl Parsler<Output = f64> + Clone {
     Recognise(
-        opt(match_char('-').attempt())
+        opt(match_char('-'))
             .then(
-                match_char('0').attempt().then(pure(())).or(Satisfy(digit19)
-                    .attempt()
-                    .then(many(Satisfy(digit).attempt()))
-                    .then(pure(()))),
+                match_char('0')
+                    .then(pure(()))
+                    .or(Satisfy(digit19).then(many(Satisfy(digit))).then(pure(()))),
             )
-            .then(opt(match_char('.')
-                .attempt()
-                .then(many(Satisfy(digit).attempt()))))
+            .then(opt(match_char('.').then(many(Satisfy(digit)))))
             .then(opt(match_char('e')
-                .attempt()
-                .or(match_char('E').attempt())
-                .then(opt(match_char('-').attempt().or(match_char('+').attempt())))
-                .then(many(Satisfy(digit).attempt())))),
+                .or(match_char('E'))
+                .then(opt(match_char('-').or(match_char('+'))))
+                .then(many(Satisfy(digit))))),
     )
     .map(parse_double)
 }
@@ -126,20 +121,20 @@ fn uint() -> impl Parsler<Output = usize> + Clone {
 }
 
 fn object() -> impl Parsler<Output = parslers_json::Json> + Clone {
-    ws(match_char('{').attempt())
-        .then(many_map((object_item()).before(opt(ws(match_char(',').attempt())))).map(insert_opt))
+    ws(match_char('{'))
+        .then(many_map((object_item()).before(opt(ws(match_char(','))))).map(insert_opt))
         .ap(object_item().map(option).or(pure(None)))
         .before(ws(match_char('}')))
         .map(json_object)
 }
 
 fn json() -> impl Parsler<Output = parslers_json::Json> + Clone {
-    let boolean = ws(tag("true").attempt())
+    let boolean = ws(tag("true"))
         .then(pure(true))
-        .or(ws(tag("false").attempt()).then(pure(false)))
+        .or(ws(tag("false")).then(pure(false)))
         .map(json_bool);
 
-    let null = ws(tag("null").attempt()).then(pure(parslers_json::Json::Null));
+    let null = ws(tag("null")).then(pure(parslers_json::Json::Null));
 
     let number = ws(number()).map(json_number);
 
@@ -162,15 +157,14 @@ fn brainfuck_loop(p: parslers_branflakes::BrainfuckProgram) -> parslers_branflak
 }
 
 fn brainfuck_program() -> impl Parsler<Output = parslers_branflakes::BrainfuckProgram> + Clone {
-    let left = match_char('<').attempt().then(pure(Brainfuck::Left));
-    let right = match_char('>').attempt().then(pure(Brainfuck::Right));
-    let add = match_char('+').attempt().then(pure(Brainfuck::Add));
-    let sub = match_char('-').attempt().then(pure(Brainfuck::Sub));
-    let print = match_char('.').attempt().then(pure(Brainfuck::Print));
-    let read = match_char(',').attempt().then(pure(Brainfuck::Read));
+    let left = match_char('<').then(pure(Brainfuck::Left));
+    let right = match_char('>').then(pure(Brainfuck::Right));
+    let add = match_char('+').then(pure(Brainfuck::Add));
+    let sub = match_char('-').then(pure(Brainfuck::Sub));
+    let print = match_char('.').then(pure(Brainfuck::Print));
+    let read = match_char(',').then(pure(Brainfuck::Read));
     let loop_ = || {
         match_char('[')
-            .attempt()
             .then(brainfuck_program())
             .map(brainfuck_loop)
             .before(match_char(']'))
