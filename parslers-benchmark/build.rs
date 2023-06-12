@@ -1,3 +1,4 @@
+#![allow(incomplete_features)]
 #![feature(
     unboxed_closures,
     fn_traits,
@@ -8,11 +9,8 @@
     impl_trait_in_assoc_type
 )]
 
-use std::rc::Rc;
-
+use auxiliary::*;
 use parslers_branflakes::Brainfuck;
-use parslers_json::Json;
-// use parslers_json::parslers_json::Json;
 use parslers_lib::parsler::*;
 use parslers_lib::reflect::*;
 use parslers_macro::reflect;
@@ -116,9 +114,6 @@ fn number() -> impl Parsler<Output = f64> + Clone {
 fn parse_usize(s: String) -> usize {
     s.parse().unwrap()
 }
-fn uint() -> impl Parsler<Output = usize> + Clone {
-    Recognise(many(Satisfy(digit))).map(parse_usize)
-}
 
 fn object() -> impl Parsler<Output = parslers_json::Json> + Clone {
     ws(match_char('{'))
@@ -182,10 +177,6 @@ fn brainfuck_program() -> impl Parsler<Output = parslers_branflakes::BrainfuckPr
     })
 }
 
-fn some_a() -> impl Parsler<Output = ()> + Clone {
-    name("some_a", || match_char('a').then(opt(some_a())))
-}
-
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
 
@@ -201,12 +192,6 @@ fn main() {
         brainfuck_program().then(pure(())),
         context,
     );
-
-    // let test = pure("1.2344".to_owned()).map(parse_double).map(singleton);
-
-    // let mut test = parslers_lib::code_gen::compile("test", test, context);
-
-    // test.parser = test.parser.reduce_down();
 
     p.parser = p.parser.reduce();
     p.parser
@@ -234,8 +219,6 @@ fn main() {
         context,
     )
     .to_string();
-
-    // wow
 
     // Write the combinators file to the output directoryas
     std::fs::write(format!("{}/combinators.rs", out_dir), parslers_out).unwrap();

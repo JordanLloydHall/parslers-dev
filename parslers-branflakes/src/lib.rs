@@ -15,12 +15,6 @@ pub enum Brainfuck {
     Print,
     Loop(BrainfuckProgram),
 }
-// Brainfuck::Null => "Null".to_owned(),
-// Brainfuck::Bool(b) => format!("Bool({})", b.reflect()),
-// Brainfuck::Number(n) => format!("Number({})", n.reflect()),
-// Brainfuck::String(s) => format!("String({})", s.reflect()),
-// Brainfuck::Array(a) => format!("Array({})", a.reflect()),
-// Brainfuck::Object(o) => format!("Object({})", o.reflect()),
 
 impl Reflect for BrainfuckProgram {
     fn reflect(&self) -> String {

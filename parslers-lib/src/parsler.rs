@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::{hash::Hasher, marker::PhantomData, rc::Rc, str::Chars};
 
@@ -9,19 +8,13 @@ use either::Either;
 use parslers_macro::reflect;
 
 use crate::ast::AnalysedParser;
-use crate::reflect;
-use crate::{
-    ast::{self},
-    code_gen::CompileContext,
-    reflect::Reflect,
-};
+use crate::{ast, code_gen::CompileContext, reflect::Reflect};
 
 impl std::hash::Hash for dyn DynHashable {
     fn hash<H>(&self, state: &mut H)
     where
         H: Hasher,
     {
-        // let unboxed_ref = &(*self) as &dyn Parsler<Output = T>;
         self.dyn_hash(state)
     }
 }
@@ -41,20 +34,6 @@ impl<T> Hash for dyn Parsler<Output = T> {
         self.dyn_hash(state);
     }
 }
-
-// pub trait DynPartialEq {
-//     fn dyn_eq(&self, other: &dyn DynPartialEq) -> bool;
-// }
-
-// impl<T: std::cmp::PartialEq + ?Sized + 'static> DynPartialEq for T {
-//     fn dyn_eq(&self, other: &dyn DynPartialEq) -> bool {
-//         if let Some(other) = other.downcast_ref::<Self>() {
-//             self == other
-//         } else {
-//             false
-//         }
-//     }
-// }
 
 pub trait Parsler: DynHashable {
     type Output;
@@ -144,14 +123,6 @@ impl<P: Parsler, F: FnOnce() -> P + Clone> LazyParser<P, F> {
     }
 }
 
-// impl<P: Parsler, F: FnOnce() -> P + Clone> Eq for LazyParser<P, F> {}
-
-// impl<P: Parsler, F: FnOnce() -> P + Clone> PartialEq for LazyParser<P, F> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0 && self.1 == other.1
-//     }
-// }
-
 impl<P: Parsler, F: FnOnce() -> P + Clone> Hash for LazyParser<P, F> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::any::type_name::<Self>().hash(state);
@@ -178,14 +149,6 @@ impl<F: FnOnce(char) -> bool + Reflect + Clone> Hash for Satisfy<F> {
         self.0.reflect().hash(state);
     }
 }
-
-// impl<F: FnOnce(char) -> bool + Reflect + Clone> Eq for Satisfy<F> {}
-
-// impl<F: FnOnce(char) -> bool + Reflect + Clone> PartialEq for Satisfy<F> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0
-//     }
-// }
 
 impl<F: FnOnce(char) -> bool + Reflect + Clone> Parsler for Satisfy<F> {
     type Output = char;
@@ -216,16 +179,6 @@ impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler + Clone, P2: Parsler<Output = F>
         Self(self.0.clone(), self.1.clone())
     }
 }
-
-// impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Eq for Ap<B, F, P1, P2> {}
-
-// impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> PartialEq
-//     for Ap<B, F, P1, P2>
-// {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0
-//     }
-// }
 
 impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Hash
     for Ap<B, F, P1, P2>
@@ -258,21 +211,16 @@ impl<B, F: FnOnce(P1::Output) -> B, P1: Parsler, P2: Parsler<Output = F>> Parsle
 }
 
 #[derive(Debug)]
-pub struct Map<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect>(pub P1, pub F);
+pub struct Map<B, P1, F>(pub P1, pub F)
+where
+    P1: Parsler,
+    F: FnOnce(P1::Output) -> B + Clone + Reflect;
 
 impl<B, P1: Parsler + Clone, F: FnOnce(P1::Output) -> B + Clone + Reflect> Clone for Map<B, P1, F> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), self.1.clone())
     }
 }
-
-// impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> Eq for Map<B, P1, F> {}
-
-// impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> PartialEq for Map<B, P1, F> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0
-//     }
-// }
 
 impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> Hash for Map<B, P1, F> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -281,7 +229,11 @@ impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> Hash for Map<
     }
 }
 
-impl<B, P1: Parsler, F: FnOnce(P1::Output) -> B + Clone + Reflect> Parsler for Map<B, P1, F> {
+impl<B, P1, F> Parsler for Map<B, P1, F>
+where
+    P1: Parsler,
+    F: FnOnce(P1::Output) -> B + Clone + Reflect,
+{
     type Output = B;
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
         let a = self.0.parse(input)?;
@@ -310,14 +262,6 @@ impl<P1: Parsler, P2: Parsler> Hash for Then<P1, P2> {
         self.1.dyn_hash(state);
     }
 }
-
-// impl<P1: Parsler, P2: Parsler> Eq for Then<P1, P2> {}
-
-// impl<P1: Parsler, P2: Parsler> PartialEq for Then<P1, P2> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0 && self.1 == other.1
-//     }
-// }
 
 impl<P1: Parsler, P2: Parsler> Parsler for Then<P1, P2> {
     type Output = P2::Output;
@@ -348,14 +292,6 @@ impl<P1: Parsler, P2: Parsler> Hash for Before<P1, P2> {
     }
 }
 
-// impl<P1: Parsler, P2: Parsler> Eq for Before<P1, P2> {}
-
-// impl<P1: Parsler, P2: Parsler> PartialEq for Before<P1, P2> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0 && self.1 == other.1
-//     }
-// }
-
 impl<P1: Parsler, P2: Parsler> Parsler for Before<P1, P2> {
     type Output = P1::Output;
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
@@ -384,14 +320,6 @@ impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Hash for Or<P1, P2> {
         self.1.dyn_hash(state);
     }
 }
-
-// impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Eq for Or<P1, P2> {}
-
-// impl<P1: Parsler, P2: Parsler<Output = P1::Output>> PartialEq for Or<P1, P2> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0 && self.1 == other.1
-//     }
-// }
 
 impl<P1: Parsler, P2: Parsler<Output = P1::Output>> Parsler for Or<P1, P2> {
     type Output = P1::Output;
@@ -459,35 +387,6 @@ impl<
     }
 }
 
-// impl<
-//         L,
-//         R,
-//         O,
-//         F1: FnOnce(L) -> O + Reflect,
-//         F2: FnOnce(R) -> O + Reflect,
-//         P1: Parsler<Output = Either<L, R>>,
-//         P2: Parsler<Output = F1>,
-//         P3: Parsler<Output = F2>,
-//     > PartialEq for Branch<L, R, O, F1, F2, P1, P2, P3>
-// {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0 && self.1 == other.1 && self.2 == other.2
-//     }
-// }
-
-// impl<
-//         L,
-//         R,
-//         O,
-//         F1: FnOnce(L) -> O + Reflect,
-//         F2: FnOnce(R) -> O + Reflect,
-//         P1: Parsler<Output = Either<L, R>>,
-//         P2: Parsler<Output = F1>,
-//         P3: Parsler<Output = F2>,
-//     > Eq for Branch<L, R, O, F1, F2, P1, P2, P3>
-// {
-// }
-
 impl<
         L,
         R,
@@ -541,14 +440,6 @@ impl<O> Hash for Empty<O> {
     }
 }
 
-// impl<O> Eq for Empty<O> {}
-
-// impl<O> PartialEq for Empty<O> {
-//     fn eq(&self, _other: &Self) -> bool {
-//         true
-//     }
-// }
-
 impl<O> Parsler for Empty<O> {
     type Output = O;
     fn parse(&self, _input: &mut Chars) -> Result<Self::Output, String> {
@@ -568,14 +459,6 @@ impl<P1: Parsler> Hash for Attempt<P1> {
         self.0.dyn_hash(state);
     }
 }
-
-// impl<P1: Parsler> Eq for Attempt<P1> {}
-
-// impl<P1: Parsler> PartialEq for Attempt<P1> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0
-//     }
-// }
 
 impl<P1: Parsler> Parsler for Attempt<P1> {
     type Output = P1::Output;
@@ -602,14 +485,6 @@ impl<P1: Parsler> Hash for Look<P1> {
     }
 }
 
-// impl<P1: Parsler> Eq for Look<P1> {}
-
-// impl<P1: Parsler> PartialEq for Look<P1> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0
-//     }
-// }
-
 impl<P1: Parsler> Parsler for Look<P1> {
     type Output = P1::Output;
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
@@ -630,14 +505,6 @@ impl<P1: Parsler> Hash for NegLook<P1> {
         self.0.dyn_hash(state);
     }
 }
-
-// impl<P1: Parsler> Eq for NegLook<P1> {}
-
-// impl<P1: Parsler> PartialEq for NegLook<P1> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0
-//     }
-// }
 
 impl<P1: Parsler<Output = ()>> Parsler for NegLook<P1> {
     type Output = ();
@@ -662,14 +529,6 @@ impl<A: Reflect> Hash for Pure<A> {
         self.0.reflect().hash(state);
     }
 }
-
-// impl<A: Reflect> Eq for Pure<A> {}
-
-// impl<A: Reflect> PartialEq for Pure<A> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0.reflect() == other.0.reflect()
-//     }
-// }
 
 impl<A: Clone + Reflect> Parsler for Pure<A> {
     type Output = A;
@@ -701,14 +560,6 @@ impl<P: Parsler> Hash for NamedParser<P> {
         self.1.dyn_hash(state)
     }
 }
-
-// impl<P: Parsler> Eq for NamedParser<P> {}
-
-// impl<P: Parsler> PartialEq for NamedParser<P> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0.dyn_eq(&other.0) && self.1 == other.1
-//     }
-// }
 
 fn hash(h: impl Hash) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -755,14 +606,6 @@ impl<F: FnOnce(P0::Output) -> P0::Output, P0: Parsler, PN: Parsler<Output = F>> 
     }
 }
 
-// impl<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler> Eq for Loop<P0, PN> {}
-
-// impl<P0: Parsler<Output = Vec<PN::Output>>, PN: Parsler> PartialEq for Loop<P0, PN> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0 == other.0 && self.1 == other.1
-//     }
-// }
-
 impl<F, P0, PN> Parsler for Loop<F, P0, PN>
 where
     F: FnOnce(P0::Output) -> P0::Output,
@@ -797,14 +640,6 @@ impl<P: Parsler> Hash for Recognise<P> {
         self.0.dyn_hash(state);
     }
 }
-
-// impl<P: Parsler> Eq for Recognise<P> {}
-
-// impl<P: Parsler> PartialEq for Recognise<P> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.0.dyn_eq(&other.0)
-//     }
-// }
 
 impl<P: Parsler> Parsler for Recognise<P> {
     type Output = String;
@@ -843,322 +678,320 @@ impl<P: Parsler + ?Sized + Hash> Parsler for Rc<P> {
     }
 }
 
-#[reflect]
-pub fn cons<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
-    move |mut v| {
-        v.push(a);
-        v
+pub mod auxiliary {
+    use super::*;
+    #[reflect]
+    pub fn cons<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
+        move |mut v| {
+            v.push(a);
+            v
+        }
     }
-}
 
-#[reflect]
-pub fn append<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
-    move |mut v| {
-        v.push(a);
-        v
+    #[reflect]
+    pub fn append<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
+        move |mut v| {
+            v.push(a);
+            v
+        }
     }
-}
 
-// #[reflect]
-// pub fn append_fn<A: 'static>(a: A) -> impl FnOnce(Vec<A>) -> Vec<A> {
-//     move |mut v| {
-//         v.push(a);
-//         v
-//     }
-// }
-
-#[reflect]
-pub fn insert<A: 'static + Eq + std::hash::Hash, B: 'static>(
-    a: (A, B),
-) -> impl FnOnce(std::collections::HashMap<A, B>) -> std::collections::HashMap<A, B> {
-    move |mut v| {
-        v.insert(a.0, a.1);
-        v
-    }
-}
-
-#[reflect]
-pub fn insert_opt<A: 'static + Eq + std::hash::Hash, B: 'static>(
-    mut v: std::collections::HashMap<A, B>,
-) -> impl FnOnce(Option<(A, B)>) -> std::collections::HashMap<A, B> {
-    move |mut a| {
-        if let Some(a) = a {
+    #[reflect]
+    pub fn insert<A: 'static + Eq + std::hash::Hash, B: 'static>(
+        a: (A, B),
+    ) -> impl FnOnce(std::collections::HashMap<A, B>) -> std::collections::HashMap<A, B> {
+        move |mut v| {
             v.insert(a.0, a.1);
+            v
         }
+    }
+
+    #[reflect]
+    pub fn insert_opt<A: 'static + Eq + std::hash::Hash, B: 'static>(
+        mut v: std::collections::HashMap<A, B>,
+    ) -> impl FnOnce(Option<(A, B)>) -> std::collections::HashMap<A, B> {
+        move |a| {
+            if let Some(a) = a {
+                v.insert(a.0, a.1);
+            }
+            v
+        }
+    }
+
+    #[reflect]
+    fn singleton<A>(a: A) -> Vec<A> {
+        vec![a]
+    }
+
+    #[reflect]
+    fn concat<A: 'static>(mut v: Vec<A>) -> impl FnOnce(Vec<A>) -> Vec<A> {
+        move |mut a| {
+            v.append(&mut a);
+            v
+        }
+    }
+
+    #[reflect]
+    fn reverse<A>(mut v: Vec<A>) -> Vec<A> {
+        v.reverse();
         v
     }
-}
 
-#[reflect]
-fn singleton<A>(a: A) -> Vec<A> {
-    vec![a]
-}
-
-#[reflect]
-fn concat<A: 'static>(mut v: Vec<A>) -> impl FnOnce(Vec<A>) -> Vec<A> {
-    move |mut a| {
-        v.append(&mut a);
-        v
+    pub fn some_rev<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
+    where
+        P: Parsler + Clone + 'static,
+        P::Output: Clone + 'static + Reflect,
+    {
+        name("some_rev", || p.clone().map(append).ap(many_rev(p)))
     }
-}
 
-#[reflect]
-fn reverse<A>(mut v: Vec<A>) -> Vec<A> {
-    v.reverse();
-    v
-    // v.into_iter().rev().collect()
-}
-
-pub fn some_rev<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
-where
-    P: Parsler + Clone + 'static,
-    P::Output: Clone + 'static + Reflect,
-{
-    name("some_rev", || p.clone().map(append).ap(many_rev(p)))
-}
-
-pub fn many_rev<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
-where
-    P: Parsler + Clone + 'static,
-    P::Output: Clone + 'static + Reflect,
-{
-    name("many_rev", || some_rev(p).or(pure(vec![])))
-}
-
-pub fn many<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
-where
-    P: Parsler + Clone + 'static,
-    P::Output: Clone + 'static + Reflect,
-{
-    dynamic(Loop(pure(vec![]), Map(p, append)))
-}
-
-pub trait IntoPair<A, B> {
-    fn into_pair(self) -> (A, B);
-}
-
-impl<A, B> IntoPair<A, B> for (A, B) {
-    fn into_pair(self) -> (A, B) {
-        self
+    pub fn many_rev<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
+    where
+        P: Parsler + Clone + 'static,
+        P::Output: Clone + 'static + Reflect,
+    {
+        name("many_rev", || some_rev(p).or(pure(vec![])))
     }
-}
 
-pub fn many_map<
-    A: Clone + 'static + Reflect + Eq + Hash,
-    B: Clone + 'static + Reflect,
-    P: Parsler<Output = (A, B)> + Clone + 'static,
->(
-    p: P,
-) -> impl Parsler<Output = HashMap<A, B>> + Clone {
-    dynamic(Loop(pure(HashMap::new()), Map(p, insert)))
-}
+    pub fn many<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
+    where
+        P: Parsler + Clone + 'static,
+        P::Output: Clone + 'static + Reflect,
+    {
+        dynamic(Loop(pure(vec![]), Map(p, append)))
+    }
 
-pub fn some<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
-where
-    P: Parsler + Clone + 'static,
-    P::Output: Clone + 'static,
-{
-    dynamic(Loop(p.clone().map(singleton), pure(append).ap(p)))
-}
+    pub trait IntoPair<A, B> {
+        fn into_pair(self) -> (A, B);
+    }
 
-#[reflect]
-fn singleton_map<A: 'static + Eq + std::hash::Hash, B: 'static>(
-    a: (A, B),
-) -> std::collections::HashMap<A, B> {
-    let mut m = HashMap::new();
-    m.insert(a.0, a.1);
-    m
-}
-
-pub fn some_map<
-    A: Clone + 'static + Reflect + Eq + Hash,
-    B: Clone + 'static + Reflect,
-    P: Parsler<Output = (A, B)> + Clone + 'static,
->(
-    p: P,
-) -> impl Parsler<Output = HashMap<A, B>> + Clone {
-    dynamic(Loop(p.clone().map(singleton_map), Map(p, insert)))
-}
-
-pub fn match_char(c: char) -> impl Parsler<Output = char> + Clone {
-    #[derive(Copy, Clone, Debug, Hash)]
-    struct CharMatch(char);
-    impl Reflect for CharMatch {
-        fn name(&self) -> &'static str {
-            "match_char"
-        }
-        fn reflect(&self) -> String {
-            format!("fn match_char(a: char) -> bool {{ a == {:?}}}", self.0)
+    impl<A, B> IntoPair<A, B> for (A, B) {
+        fn into_pair(self) -> (A, B) {
+            self
         }
     }
 
-    impl FnOnce<(char,)> for CharMatch {
-        type Output = bool;
-
-        extern "rust-call" fn call_once(self, (c,): (char,)) -> Self::Output {
-            // println!("{} == {}", c, self.0);
-            c == self.0
-        }
+    pub fn many_map<
+        A: Clone + 'static + Reflect + Eq + Hash,
+        B: Clone + 'static + Reflect,
+        P: Parsler<Output = (A, B)> + Clone + 'static,
+    >(
+        p: P,
+    ) -> impl Parsler<Output = HashMap<A, B>> + Clone {
+        dynamic(Loop(pure(HashMap::new()), Map(p, insert)))
     }
 
-    Satisfy(CharMatch(c))
-}
-
-pub fn one_of(chars: impl IntoIterator<Item = char>) -> std::rc::Rc<dyn Parsler<Output = char>> {
-    let mut iter = chars
-        .into_iter()
-        .map(|c| Rc::new(match_char(c).attempt()) as Rc<dyn Parsler<Output = char>>);
-    let first = iter.next().unwrap();
-    iter.fold(first, |a, b| Rc::new(a.or(b)))
-}
-
-#[reflect]
-fn id<A>(a: A) -> A {
-    a
-}
-
-struct emty<A>(PhantomData<A>);
-
-impl<A> FnOnce<((),)> for emty<A> {
-    type Output = A;
-    extern "rust-call" fn call_once(self, _: ((),)) -> Self::Output {
-        panic!("emty")
-    }
-}
-
-impl<A> Reflect for emty<A> {
-    fn name(&self) -> &'static str {
-        "emty"
-    }
-    fn reflect(&self) -> String {
-        format!(
-            "fn emty(a: ()) -> {} {{ panic!(\"emty\") }}",
-            std::any::type_name::<A>()
-        )
-    }
-}
-
-pub fn filtered_by<P: Parsler + Clone, F: FnOnce(&P::Output) -> bool + Reflect + Clone + Hash>(
-    p: P,
-    f: F,
-) -> impl Parsler<Output = P::Output> + Clone {
-    struct Cond<O, F>(F, PhantomData<O>);
-
-    impl<O, F: Clone> Clone for Cond<O, F> {
-        fn clone(&self) -> Self {
-            Cond(self.0.clone(), PhantomData)
-        }
+    pub fn some<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
+    where
+        P: Parsler + Clone + 'static,
+        P::Output: Clone + 'static,
+    {
+        dynamic(Loop(p.clone().map(singleton), pure(append).ap(p)))
     }
 
-    impl<O, F: Reflect + Clone + Hash> Hash for Cond<O, F> {
-        fn hash<H: Hasher>(&self, state: &mut H) {
-            self.0.hash(state);
-        }
+    #[reflect]
+    fn singleton_map<A: 'static + Eq + std::hash::Hash, B: 'static>(
+        a: (A, B),
+    ) -> std::collections::HashMap<A, B> {
+        let mut m = HashMap::new();
+        m.insert(a.0, a.1);
+        m
     }
 
-    impl<I, F: FnOnce(&I) -> bool + Reflect> Reflect for Cond<I, F> {
-        fn reflect(&self) -> String {
-            format!(
-                "
-                fn cond(x: {}) -> either::Either<(), {}> {{
-                    {}
-                    if {{{}}}(&x) {{
-                        either::Either::Right(x)
-                    }} else {{
-                        either::Either::Left(())
-                    }}
-                }}
-                ",
-                std::any::type_name::<I>(),
-                std::any::type_name::<I>(),
-                self.0.reflect(),
-                self.0.name().split("::").last().unwrap(),
-            )
-            .to_owned()
-        }
+    pub fn some_map<
+        A: Clone + 'static + Reflect + Eq + Hash,
+        B: Clone + 'static + Reflect,
+        P: Parsler<Output = (A, B)> + Clone + 'static,
+    >(
+        p: P,
+    ) -> impl Parsler<Output = HashMap<A, B>> + Clone {
+        dynamic(Loop(p.clone().map(singleton_map), Map(p, insert)))
     }
 
-    impl<O, F: FnOnce(&O) -> bool + Reflect> FnOnce<(O,)> for Cond<O, F> {
-        type Output = either::Either<(), O>;
-
-        extern "rust-call" fn call_once(self, (a,): (O,)) -> Self::Output {
-            if (self.0)(&a) {
-                either::Either::Right(a)
-            } else {
-                either::Either::Left(())
+    pub fn match_char(c: char) -> impl Parsler<Output = char> + Clone {
+        #[derive(Copy, Clone, Debug, Hash)]
+        struct CharMatch(char);
+        impl Reflect for CharMatch {
+            fn name(&self) -> &'static str {
+                "match_char"
+            }
+            fn reflect(&self) -> String {
+                format!("fn match_char(a: char) -> bool {{ a == {:?}}}", self.0)
             }
         }
+
+        impl FnOnce<(char,)> for CharMatch {
+            type Output = bool;
+
+            extern "rust-call" fn call_once(self, (c,): (char,)) -> Self::Output {
+                c == self.0
+            }
+        }
+
+        Satisfy(CharMatch(c))
     }
 
-    Branch(
-        Ap(pure(Cond(f, PhantomData)), p),
-        Empty::<emty<P::Output>>::default(),
-        pure(id),
-    )
-}
+    pub fn one_of(
+        chars: impl IntoIterator<Item = char>,
+    ) -> std::rc::Rc<dyn Parsler<Output = char>> {
+        chars
+            .into_iter()
+            .map(|c| Rc::new(match_char(c)) as Rc<dyn Parsler<Output = char>>)
+            .reduce(|a, b| Rc::new(a.or(b)))
+            .unwrap()
+    }
 
-#[reflect]
-pub fn collect_string(chars: Vec<char>) -> String {
-    chars.into_iter().collect()
-}
+    #[reflect]
+    fn id<A>(a: A) -> A {
+        a
+    }
 
-pub fn ident(
-    is_not_keyword: impl FnOnce(&String) -> bool + Reflect + Clone + Hash,
-) -> impl Parsler<Output = String> {
-    filtered_by(some(one_of('a'..='z')).map(collect_string), is_not_keyword)
-}
+    #[allow(non_camel_case_types)]
+    struct emty<A>(PhantomData<A>);
 
-pub fn tag(s: &str) -> impl Parsler<Output = &str> + Clone {
-    let mut iter = s
-        .chars()
-        .map(|c| Rc::new(match_char(c)) as Rc<dyn Parsler<Output = char>>);
+    impl<A> FnOnce<((),)> for emty<A> {
+        type Output = A;
+        extern "rust-call" fn call_once(self, _: ((),)) -> Self::Output {
+            panic!("emty")
+        }
+    }
 
-    let first = iter.next().unwrap();
-    iter.fold(first, |a, b| Rc::new(a.then(b))).then(pure(s))
-}
-
-pub fn not(c: char) -> impl Parsler<Output = char> + Clone {
-    #[derive(Copy, Clone, Debug, Hash)]
-    struct CharNot(char);
-    impl Reflect for CharNot {
+    impl<A> Reflect for emty<A> {
         fn name(&self) -> &'static str {
-            "not"
+            "emty"
         }
         fn reflect(&self) -> String {
-            format!("fn not(a: char) -> bool {{ a != '{}'}}", self.0)
+            format!(
+                "fn emty(a: ()) -> {} {{ panic!(\"emty\") }}",
+                std::any::type_name::<A>()
+            )
         }
     }
 
-    impl FnOnce<(char,)> for CharNot {
-        type Output = bool;
+    pub fn filtered_by<
+        P: Parsler + Clone,
+        F: FnOnce(&P::Output) -> bool + Reflect + Clone + Hash,
+    >(
+        p: P,
+        f: F,
+    ) -> impl Parsler<Output = P::Output> + Clone {
+        struct Cond<O, F>(F, PhantomData<O>);
 
-        extern "rust-call" fn call_once(self, (c,): (char,)) -> Self::Output {
-            c != self.0
+        impl<O, F: Clone> Clone for Cond<O, F> {
+            fn clone(&self) -> Self {
+                Cond(self.0.clone(), PhantomData)
+            }
         }
+
+        impl<O, F: Reflect + Clone + Hash> Hash for Cond<O, F> {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                self.0.hash(state);
+            }
+        }
+
+        impl<I, F: FnOnce(&I) -> bool + Reflect> Reflect for Cond<I, F> {
+            fn reflect(&self) -> String {
+                format!(
+                    "
+                    fn cond(x: {}) -> either::Either<(), {}> {{
+                        {}
+                        if {{{}}}(&x) {{
+                            either::Either::Right(x)
+                        }} else {{
+                            either::Either::Left(())
+                        }}
+                    }}
+                    ",
+                    std::any::type_name::<I>(),
+                    std::any::type_name::<I>(),
+                    self.0.reflect(),
+                    self.0.name().split("::").last().unwrap(),
+                )
+                .to_owned()
+            }
+        }
+
+        impl<O, F: FnOnce(&O) -> bool + Reflect> FnOnce<(O,)> for Cond<O, F> {
+            type Output = either::Either<(), O>;
+
+            extern "rust-call" fn call_once(self, (a,): (O,)) -> Self::Output {
+                if (self.0)(&a) {
+                    either::Either::Right(a)
+                } else {
+                    either::Either::Left(())
+                }
+            }
+        }
+
+        Branch(
+            Ap(pure(Cond(f, PhantomData)), p),
+            Empty::<emty<P::Output>>::default(),
+            pure(id),
+        )
     }
 
-    Satisfy(CharNot(c))
-}
+    #[reflect]
+    pub fn collect_string(chars: Vec<char>) -> String {
+        chars.into_iter().collect()
+    }
 
-pub fn opt(p: impl Parsler + Clone) -> impl Parsler<Output = ()> + Clone {
-    // p.then(pure(())).or(pure(()))
-    Or(p.then(pure(())), pure(()))
-}
+    pub fn ident(
+        is_not_keyword: impl FnOnce(&String) -> bool + Reflect + Clone + Hash,
+    ) -> impl Parsler<Output = String> {
+        filtered_by(some(one_of('a'..='z')).map(collect_string), is_not_keyword)
+    }
 
-pub fn ws<P: Parsler + Clone>(p: P) -> impl Parsler<Output = P::Output> + Clone {
-    p.before(many(one_of(" \t\n\r".chars())))
-}
+    pub fn tag(s: &str) -> impl Parsler<Output = &str> + Clone {
+        let mut iter = s
+            .chars()
+            .map(|c| Rc::new(match_char(c)) as Rc<dyn Parsler<Output = char>>);
 
-pub fn dynamic<P>(p: P) -> Rc<dyn Parsler<Output = P::Output>>
-where
-    P: Parsler + 'static,
-{
-    Rc::new(p)
+        let first = iter.next().unwrap();
+        iter.fold(first, |a, b| Rc::new(a.then(b))).then(pure(s))
+    }
+
+    pub fn not(c: char) -> impl Parsler<Output = char> + Clone {
+        #[derive(Copy, Clone, Debug, Hash)]
+        struct CharNot(char);
+        impl Reflect for CharNot {
+            fn name(&self) -> &'static str {
+                "not"
+            }
+            fn reflect(&self) -> String {
+                format!("fn not(a: char) -> bool {{ a != '{}'}}", self.0)
+            }
+        }
+
+        impl FnOnce<(char,)> for CharNot {
+            type Output = bool;
+
+            extern "rust-call" fn call_once(self, (c,): (char,)) -> Self::Output {
+                c != self.0
+            }
+        }
+
+        Satisfy(CharNot(c))
+    }
+
+    pub fn opt(p: impl Parsler + Clone) -> impl Parsler<Output = ()> + Clone {
+        Or(p.then(pure(())), pure(()))
+    }
+
+    pub fn ws<P: Parsler + Clone>(p: P) -> impl Parsler<Output = P::Output> + Clone {
+        p.before(many(one_of(" \t\n\r".chars())))
+    }
+
+    pub fn dynamic<P>(p: P) -> Rc<dyn Parsler<Output = P::Output>>
+    where
+        P: Parsler + 'static,
+    {
+        Rc::new(p)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{auxiliary::*, *};
     #[test]
     fn ident_works_correctly() {
         #[reflect]

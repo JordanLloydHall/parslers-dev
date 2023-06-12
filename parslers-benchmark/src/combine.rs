@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use combine::{
     error::{Commit, ParseError},
@@ -9,7 +9,8 @@ use combine::{
         repeat::{many, many1, sep_by},
         sequence::between,
         token::{any, satisfy, satisfy_map},
-    }, Parser, Stream, StreamOnce,
+    },
+    Parser, Stream, StreamOnce,
 };
 
 #[derive(PartialEq, Debug)]
@@ -166,20 +167,3 @@ parser! {
         ))
     }
 }
-
-// fn bench_json(bencher: &mut Bencher<'_>) {
-//     let data = test_data();
-//     let mut parser = json_value();
-//     match parser.easy_parse(position::Stream::new(&data[..])) {
-//         Ok((Value::Array(_), _)) => (),
-//         Ok(_) => panic!(),
-//         Err(err) => {
-//             println!("{}", err);
-//             panic!();
-//         }
-//     }
-//     bencher.iter(|| {
-//         let result = parser.easy_parse(position::Stream::new(&data[..]));
-//         black_box(result)
-//     });
-// }

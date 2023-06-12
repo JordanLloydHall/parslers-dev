@@ -117,7 +117,7 @@ impl AnalysedParser {
 
                 p_cut || q_cut
             }
-            Parser::Or(p, q) => q.cut_analysis(backtracks),
+            Parser::Or(_, q) => q.cut_analysis(backtracks),
             Parser::Recognise(p) => p.cut_analysis(backtracks),
             Parser::Empty => false,
             Parser::Branch(b, l, r) => {
@@ -136,16 +136,6 @@ impl AnalysedParser {
             }
         }
     }
-
-    // pub fn length_check_analysis(&mut self) -> usize {
-    //     self.input_length_checked = self.parser.length_check_analysis();
-    //     self.input_length_checked
-    // }
-
-    // pub fn cut_point_analysis(&mut self) -> bool {
-    //     self.cut_point = self.parser.cut_point_analysis();
-    //     self.cut_point
-    // }
 }
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
@@ -210,7 +200,6 @@ impl Parser {
     }
 
     pub fn reduce_up(self) -> Self {
-        // eprintln!("Reducing parser: {:?}", self);
         match self {
             Parser::Ap(
                 box AnalysedParser {
@@ -330,59 +319,51 @@ impl Parser {
     }
 
     pub fn reduce_down(self) -> Self {
-        // #[decurse::decurse]
-        // fn reduce_down_(p: Parser) -> Parser {
         let p = match self {
             Parser::Pure(p) => Parser::Pure(p),
             Parser::Satisfy(s) => Parser::Satisfy(s),
             Parser::Try(box p) => {
-                Parser::Try(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+                Parser::Try(Box::new(AnalysedParser::new(p.parser.reduce_down())))
             }
             Parser::Look(box p) => {
-                Parser::Look(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+                Parser::Look(Box::new(AnalysedParser::new(p.parser.reduce_down())))
             }
             Parser::NegLook(box p) => {
-                Parser::NegLook(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+                Parser::NegLook(Box::new(AnalysedParser::new(p.parser.reduce_down())))
             }
             Parser::Ap(box p, box q) => Parser::Ap(
-                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
-                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+                Box::new(AnalysedParser::new(p.parser.reduce_down())),
+                Box::new(AnalysedParser::new(q.parser.reduce_down())),
             ),
             Parser::Then(box p, box q) => Parser::Then(
-                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
-                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+                Box::new(AnalysedParser::new(p.parser.reduce_down())),
+                Box::new(AnalysedParser::new(q.parser.reduce_down())),
             ),
             Parser::Before(box p, box q) => Parser::Before(
-                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
-                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+                Box::new(AnalysedParser::new(p.parser.reduce_down())),
+                Box::new(AnalysedParser::new(q.parser.reduce_down())),
             ),
             Parser::Or(box p, box q) => Parser::Or(
-                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
-                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
+                Box::new(AnalysedParser::new(p.parser.reduce_down())),
+                Box::new(AnalysedParser::new(q.parser.reduce_down())),
             ),
             Parser::Empty => Parser::Empty,
             Parser::Branch(box p, box q, box r) => Parser::Branch(
-                Box::new(AnalysedParser::new((p.parser.reduce_down()))),
-                Box::new(AnalysedParser::new((q.parser.reduce_down()))),
-                Box::new(AnalysedParser::new((r.parser.reduce_down()))),
+                Box::new(AnalysedParser::new(p.parser.reduce_down())),
+                Box::new(AnalysedParser::new(q.parser.reduce_down())),
+                Box::new(AnalysedParser::new(r.parser.reduce_down())),
             ),
             Parser::Ident(id) => Parser::Ident(id),
             Parser::Recognise(box p) => {
-                Parser::Recognise(Box::new(AnalysedParser::new((p.parser.reduce_down()))))
+                Parser::Recognise(Box::new(AnalysedParser::new(p.parser.reduce_down())))
             }
             Parser::Loop(box p0, box pn) => Parser::Loop(
-                Box::new(AnalysedParser::new((p0.parser.reduce_down()))),
-                Box::new(AnalysedParser::new((pn.parser.reduce_down()))),
+                Box::new(AnalysedParser::new(p0.parser.reduce_down())),
+                Box::new(AnalysedParser::new(pn.parser.reduce_down())),
             ),
         };
 
         p.reduce_up()
-        // }
-
-        // reduce_down_(self)
-        // Special cases
-
-        // eprintln!("Finished reduction");
     }
 
     pub fn returns_func_analysis(&mut self) -> bool {
@@ -500,10 +481,11 @@ impl Parser {
             Parser::Satisfy(ident) => {
                 let ident = syn::parse_str::<syn::Expr>(&ident.name).unwrap();
                 quote! {
-
+                    let old_input = input.clone();
                     input.next().ok_or("Found EOF when character was expected").and_then(|c| if (#ident)(c) {
                         Ok(c)
                     } else {
+                        *input = old_input;
                         Err("expected a specific character")
                     })
                 }
@@ -640,10 +622,11 @@ impl Parser {
             Parser::Satisfy(ident) => {
                 let ident = syn::parse_str::<syn::Expr>(&ident.name).unwrap();
                 quote! {
-
+                    let old_input = input.clone();
                     input.next().ok_or("Found EOF when character was expected").and_then(|c| if (#ident)(c) {
                         Ok(())
                     } else {
+                        *input = old_input;
                         Err("expected a specific character")
                     })
                 }
@@ -745,85 +728,7 @@ impl Parser {
             }
         }
     }
-
-    // fn length_check_analysis(&mut self) -> usize {
-    //     match self {
-    //         Parser::Ident(_) => 0,
-    //         Parser::Pure(_) => 0,
-    //         Parser::Satisfy(_) => 1,
-    //         Parser::Try(p) => p.length_check_analysis(),
-    //         Parser::Look(p) => p.length_check_analysis(),
-    //         Parser::NegLook(p) => p.length_check_analysis(),
-    //         Parser::Ap(p, q) => p.length_check_analysis() + q.length_check_analysis(),
-    //         Parser::Then(p, q) => p.length_check_analysis() + q.length_check_analysis(),
-    //         Parser::Before(p, q) => p.length_check_analysis() + q.length_check_analysis(),
-    //         Parser::Or(p, q) => {
-    //             q.length_check_analysis();
-    //             p.length_check_analysis()
-    //         }
-    //         Parser::Recognise(p) => p.length_check_analysis(),
-    //         Parser::Empty => 0,
-    //         Parser::Branch(b, l, r) => {
-    //             b.length_check_analysis() + l.length_check_analysis().min(r.length_check_analysis())
-    //         }
-    //         Parser::Loop(p, q) => p.length_check_analysis() + q.length_check_analysis(),
-    //     }
-    // }
-
-    // fn cut_point_analysis(&mut self, demands_cut: bool) -> bool {
-    //     match (self, demands_cut) {
-    //         (Parser::Ident(_), _) => false,
-    //         (Parser::Satisfy(_), _) => true,
-    //         (Parser::Pure(_), true) => todo!(),
-    //         (Parser::Pure(_), false) => todo!(),
-    //         (Parser::Try(_), true) => todo!(),
-    //         (Parser::Try(_), false) => todo!(),
-    //         (Parser::Look(_), true) => todo!(),
-    //         (Parser::Look(_), false) => todo!(),
-    //         (Parser::NegLook(_), true) => todo!(),
-    //         (Parser::NegLook(_), false) => todo!(),
-    //         (Parser::Ap(_, _), true) => todo!(),
-    //         (Parser::Ap(_, _), false) => todo!(),
-    //         (Parser::Then(_, _), true) => todo!(),
-    //         (Parser::Then(_, _), false) => todo!(),
-    //         (Parser::Before(_, _), true) => todo!(),
-    //         (Parser::Before(_, _), false) => todo!(),
-    //         (Parser::Or(_, _), true) => todo!(),
-    //         (Parser::Or(_, _), false) => todo!(),
-    //         (Parser::Recognise(_), true) => todo!(),
-    //         (Parser::Recognise(_), false) => todo!(),
-    //         (Parser::Empty, true) => todo!(),
-    //         (Parser::Empty, false) => todo!(),
-    //         (Parser::Branch(_, _, _), true) => todo!(),
-    //         (Parser::Branch(_, _, _), false) => todo!(),
-    //         (Parser::Loop(_, _), true) => todo!(),
-    //         (Parser::Loop(_, _), false) => todo!(),
-    //     }
-    // }
 }
-
-// pub struct AnalysedParser {
-//     pub output_used: bool,
-//     pub parser: Box<AnalysedParser>,
-// }
-
-// fn usage_optimisation(p: Parser, used: bool) -> AnalysedParser {
-//     match p {
-//         // Parser::Ident(_) => todo!(),
-//         // Parser::Pure(_) => todo!(),
-//         // Parser::Satisfy(_) => todo!(),
-//         Parser::Try(_) => todo!(),
-//         Parser::Look(_) => todo!(),
-//         Parser::NegLook(_) => todo!(),
-//         Parser::Ap(_, _) => todo!(),
-//         Parser::Then(box p, box p) => AnalysedParser { output_used: used, parser: Box::new(Parser::Then((), ())) }
-//         Parser::Before(_, _) => todo!(),
-//         Parser::Or(_, _) => todo!(),
-//         Parser::Recognise(p) => todo!(),
-//         // Parser::Empty => todo!(),
-//         // Parser::Branch(_, _, _) => todo!(),
-//     }
-// }
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub enum PureVal {

@@ -1,3 +1,4 @@
+#![allow(incomplete_features)]
 #![feature(
     unboxed_closures,
     fn_traits,
@@ -11,7 +12,6 @@
 )]
 
 pub mod ast;
-pub mod builder;
 pub mod code_gen;
 pub mod parsler;
 pub mod reflect;

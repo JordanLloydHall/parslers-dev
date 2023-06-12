@@ -8,31 +8,26 @@ use ::combine::{stream::position, EasyParser};
 use criterion::{black_box, Criterion, Throughput};
 use parslers_benchmark::{combine, nom};
 
-use pest_grammars::json::*;
-
-use pest::Parser;
-
 mod debug_parser {
     #![allow(warnings, unused)]
 
     include!(concat!(env!("OUT_DIR"), "/combinators.rs"));
 }
 
-static LOSTKNG: &str = include_str!("../LostKng2.b");
+static LOSTKNG: &str = include_str!("../LostKng.b");
 fn branflakes(c: &mut Criterion) {
     // test once to make sure it parses correctly
     nom::brainfuck(LOSTKNG).unwrap();
     debug_parser::brainfuck(&mut LOSTKNG.chars()).unwrap();
-    // debug_parser::json_validate(&mut LOSTKNG.chars()).unwrap();
-    // combine::json_value()
-    //     .easy_parse(position::Stream::new(&LOSTKNG[..]))
-    //     .unwrap();
+    debug_parser::json_validate(&mut LOSTKNG.chars()).unwrap();
+    combine::json_value()
+        .easy_parse(position::Stream::new(&LOSTKNG[..]))
+        .unwrap();
 
     let mut group = c.benchmark_group("branflakes");
 
     group.throughput(Throughput::Bytes(LOSTKNG.as_bytes().len() as u64));
 
-    // println!("data:\n{:?}", json(data));
     group.bench_function("nom", |b| {
         b.iter(|| nom::brainfuck(black_box(LOSTKNG)).unwrap());
     });

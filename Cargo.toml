@@ -3,7 +3,6 @@
 members = [
     "parslers-macro",
     "parslers-lib",
-    "test-site",
     "parslers-json",
     "parslers-benchmark",
     "parslers-branflakes"
@@ -13,5 +12,3 @@ members = [
 strip = true
 lto = true
 panic = "abort"
-# debug = 1
-# codegen-units = 1

@@ -7,15 +7,6 @@ description = "An implementation of staged-selective parser combinators in Rust"
 repository = "https://github.com/JordanLloydHall/parslers"
 homepage = "https://github.com/JordanLloydHall/parslers"
 readme = "README.md"
-build = "build.rs"
-
-[[bin]]
-name = "scratch"
-path = "src/bin/scratch.rs"
-
-[[bin]]
-name = "parslers"
-path = "src/bin/parslers.rs"
 
 [lib]
 proc-macro = true
@@ -31,4 +22,3 @@ proc-macro2 = "*"
 syn = { version = "*", features = ["extra-traits", "full"] }
 quote = "*"
 proc-macro2 = "*"
-# parslers-lib = { path = "../parslers-lib" }
