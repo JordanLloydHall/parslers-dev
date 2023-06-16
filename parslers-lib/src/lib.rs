@@ -12,6 +12,7 @@
 )]
 
 pub mod ast;
+pub mod builder;
 pub mod code_gen;
 pub mod parsler;
 pub mod reflect;

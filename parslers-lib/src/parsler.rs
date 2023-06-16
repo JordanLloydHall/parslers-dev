@@ -154,11 +154,13 @@ impl<F: FnOnce(char) -> bool + Reflect + Clone> Parsler for Satisfy<F> {
     type Output = char;
 
     fn parse(&self, input: &mut Chars) -> Result<Self::Output, String> {
+        let old_input = input.clone();
         if let Some(c) = input.next() {
             if self.0.clone()(c) {
                 return Ok(c);
             }
         }
+        *input = old_input;
         Err(format!("Expected satisfy {:?}", self.0.name()))
     }
 
@@ -745,6 +747,11 @@ pub mod auxiliary {
         name("some_rev", || p.clone().map(append).ap(many_rev(p)))
     }
 
+    // #[reflect]
+    // pub fn emtpy_vec<T>() -> Vec<T> {
+    //     vec![]
+    // }
+
     pub fn many_rev<P>(p: P) -> Rc<dyn Parsler<Output = Vec<P::Output>>>
     where
         P: Parsler + Clone + 'static,
@@ -838,6 +845,16 @@ pub mod auxiliary {
             .into_iter()
             .map(|c| Rc::new(match_char(c)) as Rc<dyn Parsler<Output = char>>)
             .reduce(|a, b| Rc::new(a.or(b)))
+            .unwrap()
+    }
+
+    pub fn not_one_of(
+        chars: impl IntoIterator<Item = char>,
+    ) -> std::rc::Rc<dyn Parsler<Output = char>> {
+        chars
+            .into_iter()
+            .map(|c| Rc::new(not(c)) as Rc<dyn Parsler<Output = char>>)
+            .reduce(|a, b| Rc::new(a.then(b)))
             .unwrap()
     }
 
@@ -958,7 +975,7 @@ pub mod auxiliary {
                 "not"
             }
             fn reflect(&self) -> String {
-                format!("fn not(a: char) -> bool {{ a != '{}'}}", self.0)
+                format!("fn not(a: char) -> bool {{ a != {:?}}}", self.0)
             }
         }
 
@@ -980,6 +997,8 @@ pub mod auxiliary {
     pub fn ws<P: Parsler + Clone>(p: P) -> impl Parsler<Output = P::Output> + Clone {
         p.before(many(one_of(" \t\n\r".chars())))
     }
+
+    
 
     pub fn dynamic<P>(p: P) -> Rc<dyn Parsler<Output = P::Output>>
     where

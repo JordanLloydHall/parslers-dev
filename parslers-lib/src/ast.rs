@@ -221,7 +221,6 @@ impl Parser {
                     ..
                 },
             ) => {
-                eprintln!("Reduced parser!");
                 Parser::Pure(PureVal::Func(Func {
                     name: format!("{}({})", f1.name, f2.name),
                 }))
@@ -450,7 +449,7 @@ impl Parser {
                     }
                     *id = new_name;
                 }
-                println!("{} {}, {:?}", id, used, ctx);
+                // println!("{} {}, {:?}", id, used, ctx);
             }
             Parser::Loop(p0, pn) => {
                 p0.output_used_analysis(used, ctx);
@@ -470,7 +469,7 @@ impl Parser {
             }
             Parser::Pure(pure_val) => match pure_val {
                 PureVal::Val(val) => {
-                    let val = syn::parse_str::<syn::Expr>(&val).unwrap();
+                    let val = syn::parse_str::<syn::Expr>(&dbg!(val)).unwrap();
                     quote! { Ok(#val) }
                 }
                 PureVal::Func(Func { name }) => {
@@ -482,12 +481,16 @@ impl Parser {
                 let ident = syn::parse_str::<syn::Expr>(&ident.name).unwrap();
                 quote! {
                     let old_input = input.clone();
-                    input.next().ok_or("Found EOF when character was expected").and_then(|c| if (#ident)(c) {
-                        Ok(c)
-                    } else {
-                        *input = old_input;
-                        Err("expected a specific character")
-                    })
+                    input.next()
+                    .ok_or("Found EOF when character was expected")
+                    .and_then(|c|
+                        if (#ident)(c) {
+                            Ok(c)
+                        } else {
+                            *input = old_input;
+                            Err("Expected a specific character")
+                        }
+                    )
                 }
             }
             Parser::Try(p) => {
@@ -552,7 +555,7 @@ impl Parser {
                 let q = q.compile();
 
                 quote! {
-                    {#p}.or_else(|_| {#q})
+                    {#p}.or_else(|_: &'static str| {#q})
                 }
             }
             Parser::Recognise(p) => {
@@ -623,12 +626,16 @@ impl Parser {
                 let ident = syn::parse_str::<syn::Expr>(&ident.name).unwrap();
                 quote! {
                     let old_input = input.clone();
-                    input.next().ok_or("Found EOF when character was expected").and_then(|c| if (#ident)(c) {
-                        Ok(())
-                    } else {
-                        *input = old_input;
-                        Err("expected a specific character")
-                    })
+                    input.next()
+                    .ok_or_else(|| "Found EOF when character was expected")
+                    .and_then(|c|
+                        if (#ident)(c) {
+                            Ok(())
+                        } else {
+                            *input = old_input;
+                            Err("expected a specific character")
+                        }
+                    )
                 }
             }
             Parser::Try(p) => {

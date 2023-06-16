@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 parslers-lib = { path = "../parslers-lib" }
+parslers-macro = { path = "../parslers-macro" }

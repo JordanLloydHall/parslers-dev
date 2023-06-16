@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, marker::PhantomData};
 
 pub trait Reflect {
     fn name(&self) -> &'static str {
@@ -13,6 +13,12 @@ impl Reflect for Box<dyn Reflect> {
         format!("Box::new({})", self.as_ref().reflect())
     }
 }
+
+// impl<T: ?Sized> Reflect for PhantomData<T> {
+//     fn reflect(&self) -> String {
+//         format!("std::marker::PhantomData::<{}>::default()", std::any::type_name::<T>())
+//     }
+// }
 
 impl Reflect for char {
     fn reflect(&self) -> String {
@@ -66,7 +72,8 @@ where
 {
     fn reflect(&self) -> String {
         format!(
-            "vec![{}]",
+            "Vec::<{}>::from([{}])",
+            std::any::type_name::<A>(),
             self.iter()
                 .map(|a| a.reflect())
                 .collect::<Vec<_>>()

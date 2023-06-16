@@ -79,14 +79,14 @@ impl CompileContext {
                 let size = s.parser.size();
                 let depth = s.parser.depth();
                 s.parser = s.parser.clone().reduce();
-                eprintln!(
-                    "Reduced parser '{}' from ({}, {}) to ({}, {})",
-                    s.ident,
-                    size,
-                    depth,
-                    s.parser.size(),
-                    s.parser.depth()
-                );
+                // eprintln!(
+                //     "Reduced parser '{}' from ({}, {}) to ({}, {})",
+                //     s.ident,
+                //     size,
+                //     depth,
+                //     s.parser.size(),
+                //     s.parser.depth()
+                // );
                 s.parser
                     .output_used_analysis(true, &mut self.parsers_with_unused);
             }
