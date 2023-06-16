@@ -8,25 +8,43 @@ use ::combine::{stream::position, EasyParser};
 use criterion::{black_box, Criterion, Throughput};
 use parslers_benchmark::{combine, nom};
 
+use parslers_lib::parsler::Parsler;
 use pest_grammars::json::*;
 
 use pest::Parser;
 
-mod debug_parser {
+mod optimised_parser {
     #![allow(warnings, unused)]
+    include!(concat!(env!("OUT_DIR"), "/optimised.rs"));
+}
 
-    include!(concat!(env!("OUT_DIR"), "/combinators.rs"));
+mod reduced_parser {
+    #![allow(warnings, unused)]
+    include!(concat!(env!("OUT_DIR"), "/reduced.rs"));
+}
+
+mod usage_analysed_parser {
+    #![allow(warnings, unused)]
+    include!(concat!(env!("OUT_DIR"), "/usage_analysed.rs"));
+}
+
+mod unoptimised_parser {
+    #![allow(warnings, unused)]
+    include!(concat!(env!("OUT_DIR"), "/unoptimised.rs"));
 }
 
 static CANADA: &str = include_str!("../canada.json");
 fn canada_json(c: &mut Criterion) {
     // test once to make sure it parses correctly
     nom::json(CANADA).unwrap();
-    debug_parser::json(&mut CANADA.chars()).unwrap();
-    debug_parser::json_validate(&mut CANADA.chars()).unwrap();
+    optimised_parser::json(&mut CANADA.chars()).unwrap();
+    optimised_parser::json_validate(&mut CANADA.chars()).unwrap();
     combine::json_value()
         .easy_parse(position::Stream::new(&CANADA[..]))
         .unwrap();
+
+    let unstaged_json = parslers_benchmark::parslers::json();
+    unstaged_json.parse(&mut CANADA.chars()).unwrap();
 
     let mut group = c.benchmark_group("json canada");
 
@@ -38,14 +56,26 @@ fn canada_json(c: &mut Criterion) {
     });
 
     group.bench_function("parslers", |b| {
-        b.iter(|| debug_parser::json(black_box(&mut CANADA.chars())).unwrap());
+        b.iter(|| optimised_parser::json(black_box(&mut CANADA.chars())).unwrap());
     });
 
-    group.bench_function("parslers validate", |b| {
-        b.iter(|| debug_parser::json_validate(black_box(&mut CANADA.chars())).unwrap());
+    group.bench_function("parslers_unoptimised", |b| {
+        b.iter(|| unoptimised_parser::json(black_box(&mut CANADA.chars())).unwrap());
     });
 
-    group.bench_function("serde-json", |b| {
+    group.bench_function("parslers_reduced", |b| {
+        b.iter(|| reduced_parser::json(black_box(&mut CANADA.chars())).unwrap());
+    });
+
+    group.bench_function("parslers_usage_analysed", |b| {
+        b.iter(|| usage_analysed_parser::json(black_box(&mut CANADA.chars())).unwrap());
+    });
+
+    group.bench_function("parslers_validate", |b| {
+        b.iter(|| optimised_parser::json_validate(black_box(&mut CANADA.chars())).unwrap());
+    });
+
+    group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::from_str::<serde_json::Value>(black_box(CANADA)).unwrap());
     });
     group.bench_function("combine", |b| {
@@ -56,6 +86,9 @@ fn canada_json(c: &mut Criterion) {
         });
     });
 
+    group.bench_function("parslers_unstaged", |b| {
+        b.iter(|| unstaged_json.parse(black_box(&mut CANADA.chars())).unwrap());
+    });
     group.bench_function("pest", |b| {
         b.iter(|| JsonParser::parse(Rule::json, CANADA).unwrap())
     });
