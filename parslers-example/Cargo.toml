@@ -1,0 +1,14 @@
+[package]
+name = "parslers-example"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[build-dependencies]
+parslers-lib = { path = "../parslers-lib" }
+parslers-macro = { path = "../parslers-macro" }
+parslers-branflakes = { path = "../parslers-branflakes" }
+
+[dependencies]
+parslers-branflakes = { path = "../parslers-branflakes" }
+

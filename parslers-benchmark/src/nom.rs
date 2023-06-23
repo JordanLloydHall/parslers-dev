@@ -130,20 +130,20 @@ pub fn json(input: &str) -> IResult<&str, JsonValue> {
     ws(json_value).parse(input)
 }
 
-pub fn brainfuck(input: &str) -> IResult<&str, parslers_branflakes::BrainfuckProgram> {
+pub fn brainfuck(input: &str) -> IResult<&str, parslers_branflakes::BranflakesProgram> {
     map(
         many0(alt((
-            value(parslers_branflakes::Brainfuck::Add, char('+')),
-            value(parslers_branflakes::Brainfuck::Sub, char('-')),
-            value(parslers_branflakes::Brainfuck::Left, char('<')),
-            value(parslers_branflakes::Brainfuck::Right, char('>')),
-            value(parslers_branflakes::Brainfuck::Read, char(',')),
-            value(parslers_branflakes::Brainfuck::Print, char('.')),
+            value(parslers_branflakes::Branflakes::Add, char('+')),
+            value(parslers_branflakes::Branflakes::Sub, char('-')),
+            value(parslers_branflakes::Branflakes::Left, char('<')),
+            value(parslers_branflakes::Branflakes::Right, char('>')),
+            value(parslers_branflakes::Branflakes::Read, char(',')),
+            value(parslers_branflakes::Branflakes::Print, char('.')),
             map(
                 delimited(char('['), brainfuck, char(']')),
-                parslers_branflakes::Brainfuck::Loop,
+                parslers_branflakes::Branflakes::Loop,
             ),
         ))),
-        parslers_branflakes::BrainfuckProgram,
+        parslers_branflakes::BranflakesProgram,
     )(input)
 }

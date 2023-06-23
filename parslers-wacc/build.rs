@@ -10,7 +10,7 @@
 )]
 
 use auxiliary::*;
-use parslers_branflakes::Brainfuck;
+use parslers_branflakes::Branflakes;
 use parslers_lib::builder::Builder;
 use parslers_lib::parsler::*;
 use parslers_lib::reflect::*;

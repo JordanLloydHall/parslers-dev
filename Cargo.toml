@@ -6,7 +6,8 @@ members = [
     "parslers-json",
     "parslers-benchmark",
     "parslers-branflakes",
-    "parslers-wacc"
+    "parslers-wacc",
+    "parslers-example"
 ]
 
 [profile.release]

@@ -12,7 +12,7 @@
 use std::marker::PhantomData;
 
 use auxiliary::*;
-use parslers_branflakes::Brainfuck;
+use parslers_branflakes::Branflakes;
 use parslers_lib::builder::Builder;
 use parslers_lib::parsler::*;
 use parslers_lib::reflect::*;
@@ -146,21 +146,21 @@ fn json() -> impl Parsler<Output = parslers_json::Json> + Clone {
 }
 
 #[reflect]
-fn brainfuck_val(p: Vec<parslers_branflakes::Brainfuck>) -> parslers_branflakes::BrainfuckProgram {
-    parslers_branflakes::BrainfuckProgram(p)
+fn brainfuck_val(p: Vec<parslers_branflakes::Branflakes>) -> parslers_branflakes::BranflakesProgram {
+    parslers_branflakes::BranflakesProgram(p)
 }
 #[reflect]
-fn brainfuck_loop(p: parslers_branflakes::BrainfuckProgram) -> parslers_branflakes::Brainfuck {
-    parslers_branflakes::Brainfuck::Loop(p)
+fn brainfuck_loop(p: parslers_branflakes::BranflakesProgram) -> parslers_branflakes::Branflakes {
+    parslers_branflakes::Branflakes::Loop(p)
 }
 
-fn brainfuck_program() -> impl Parsler<Output = parslers_branflakes::BrainfuckProgram> + Clone {
-    let left = match_char('<').then(pure(Brainfuck::Left));
-    let right = match_char('>').then(pure(Brainfuck::Right));
-    let add = match_char('+').then(pure(Brainfuck::Add));
-    let sub = match_char('-').then(pure(Brainfuck::Sub));
-    let print = match_char('.').then(pure(Brainfuck::Print));
-    let read = match_char(',').then(pure(Brainfuck::Read));
+fn brainfuck_program() -> impl Parsler<Output = parslers_branflakes::BranflakesProgram> + Clone {
+    let left = match_char('<').then(pure(Branflakes::Left));
+    let right = match_char('>').then(pure(Branflakes::Right));
+    let add = match_char('+').then(pure(Branflakes::Add));
+    let sub = match_char('-').then(pure(Branflakes::Sub));
+    let print = match_char('.').then(pure(Branflakes::Print));
+    let read = match_char(',').then(pure(Branflakes::Read));
     let loop_ = || {
         match_char('[')
             .then(brainfuck_program())
@@ -263,34 +263,27 @@ fn wacc_expr() -> impl Parsler<Output = parslers_wacc::ExprWrap<String, String>>
     Empty::default()
 }
 
-// fn wacc_func() -> impl Parsler<Output = parslers_wacc::ASTWrapper<String, parslers_wacc::Function<String, String>>> + Clone {
-//     Empty::default()
-// }
-
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
 
-    Builder::new("json", json())
-        .add_parser("json_validate", json().then(pure(())))
-        .add_parser("brainfuck", brainfuck_program())
-        .add_parser("brainfuck_validate", brainfuck_program().then(pure(())))
+    Builder::new("parser", parser())
         // .add_parser("wacc", wacc_program())
         .reduce()
         .usage_analysis()
         .build(&format!("{out_dir}/optimised.rs"));
 
-    Builder::new("json", json())
-        .add_parser("brainfuck", brainfuck_program())
-        .reduce()
-        .build(&format!("{out_dir}/reduced.rs"));
+    // Builder::new("json", json())
+    //     .add_parser("brainfuck", brainfuck_program())
+    //     .reduce()
+    //     .build(&format!("{out_dir}/reduced.rs"));
 
-    Builder::new("json", json())
-        .add_parser("brainfuck", brainfuck_program())
-        .usage_analysis()
-        .build(&format!("{out_dir}/usage_analysed.rs"));
+    // Builder::new("json", json())
+    //     .add_parser("brainfuck", brainfuck_program())
+    //     .usage_analysis()
+    //     .build(&format!("{out_dir}/usage_analysed.rs"));
 
-    Builder::new("json", json())
-        .add_parser("brainfuck", brainfuck_program())
-        // .add_parser("wacc", wacc_program())
-        .build(&format!("{out_dir}/unoptimised.rs"));
+    // Builder::new("json", json())
+    //     .add_parser("brainfuck", brainfuck_program())
+    //     // .add_parser("wacc", wacc_program())
+    //     .build(&format!("{out_dir}/unoptimised.rs"));
 }

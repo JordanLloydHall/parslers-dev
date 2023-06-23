@@ -8,9 +8,7 @@
     return_position_impl_trait_in_trait,
     impl_trait_in_assoc_type
 )]
-
 #![recursion_limit = "512"]
-
 
 pub mod combine;
 pub mod nom;
