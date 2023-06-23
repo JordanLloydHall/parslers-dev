@@ -9,7 +9,6 @@
     impl_trait_in_assoc_type
 )]
 
-use parslers_branflakes::Branflakes;
 use parslers_lib::{
     builder::Builder,
     parsler::{auxiliary::*, *},
@@ -18,47 +17,81 @@ use parslers_lib::{
 use parslers_macro::reflect;
 
 #[reflect]
-fn branflakes_val(
-    p: Vec<parslers_branflakes::Branflakes>,
-) -> parslers_branflakes::BranflakesProgram {
-    parslers_branflakes::BranflakesProgram(p)
-}
-#[reflect]
-fn branflakes_loop(p: parslers_branflakes::BranflakesProgram) -> parslers_branflakes::Branflakes {
-    parslers_branflakes::Branflakes::Loop(p)
+pub fn append<A: 'static>(mut v: Vec<A>) -> impl FnOnce(Option<A>) -> Vec<A> {
+    move |mut a| {
+        if let Some(a) = a.take() {
+            v.push(a);
+        }
+        v
+    }
 }
 
-fn branflakes_program() -> impl Parsler<Output = parslers_branflakes::BranflakesProgram> + Clone {
-    let left = match_char('<').then(pure(Branflakes::Left));
-    let right = match_char('>').then(pure(Branflakes::Right));
-    let add = match_char('+').then(pure(Branflakes::Add));
-    let sub = match_char('-').then(pure(Branflakes::Sub));
-    let print = match_char('.').then(pure(Branflakes::Print));
-    let read = match_char(',').then(pure(Branflakes::Read));
-    let loop_ = || {
-        match_char('[')
-            .then(branflakes_program())
-            .map(branflakes_loop)
-            .before(match_char(']'))
-    };
-    name("branflakes", move || {
-        many(
-            left.or(right)
-                .or(add)
-                .or(sub)
-                .or(print)
-                .or(read)
-                .or(loop_()),
-        )
-        .map(branflakes_val)
-    })
+#[reflect]
+pub fn option<A>(a: A) -> Option<A> {
+    Some(a)
+}
+
+#[reflect]
+fn zip(a: String) -> Box<dyn FnOnce(parslers_json::Json) -> (String, parslers_json::Json)> {
+    Box::new(move |b| (a, b))
+}
+
+#[reflect]
+fn json_array(a: Vec<parslers_json::Json>) -> parslers_json::Json {
+    parslers_json::Json::Array(a)
+}
+
+#[reflect]
+fn json_object(a: std::collections::HashMap<String, parslers_json::Json>) -> parslers_json::Json {
+    parslers_json::Json::Object(a)
+}
+
+fn separated_list<P>(p: P, sep: char) -> impl Parsler<Output = Vec<P::Output>> + Clone
+where
+    P: Parsler + Clone + 'static,
+    P::Output: Reflect + Clone + 'static,
+{
+    many(p.clone().before(opt(ws(match_char(',')))))
+        .map(append)
+        .ap(p.map(option).or(pure(None)))
+}
+
+fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
+    ws(match_char('['))
+        .then(many(json().before(opt(ws(match_char(','))))).map(append))
+        .ap(json().map(option).or(pure(None)))
+        .before(ws(match_char(']')))
+        .map(json_array)
+}
+
+fn object() -> impl Parsler<Output = parslers_json::Json> + Clone {
+    ws(match_char('{'))
+        .then(many_map((object_item()).before(opt(ws(match_char(','))))).map(insert_opt))
+        .ap(object_item().map(option).or(pure(None)))
+        .before(ws(match_char('}')))
+        .map(json_object)
+}
+
+fn object_item() -> impl Parsler<Output = (String, parslers_json::Json)> + Clone {
+    string().before(ws(match_char(':'))).map(zip).ap(json())
+}
+
+fn json() -> impl Parsler<Output = parslers_json::Json> + Clone {
+    let null = ws(tag("null")).then(pure(parslers_json::Json::Null));
+
+    name("json", || null.or(array()).or(object()))
+}
+
+fn string() -> impl Parsler<Output = String> + Clone {
+    match_char('\"')
+        .then(Recognise(many(not('\"'))))
+        .before(ws(match_char('\"')))
 }
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
-    Builder::new("branflakes", branflakes_program())
-        .add_parser("branflakes_validate", branflakes_program().then(pure(())))
+    Builder::new("json", json())
         .reduce()
         .usage_analysis()
-        .build(&format!("{out_dir}/branflakes.rs"));
+        .build(&format!("{out_dir}/json.rs"));
 }

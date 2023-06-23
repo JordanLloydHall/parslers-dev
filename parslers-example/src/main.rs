@@ -1,18 +1,13 @@
-mod branflakes {
+mod json {
     #![allow(warnings, unused)]
-    include!(concat!(env!("OUT_DIR"), "/branflakes.rs"));
+    include!(concat!(env!("OUT_DIR"), "/json.rs"));
 }
 
 fn main() {
-    let data = std::fs::read_to_string("LostKng.b").unwrap();
+    let input = "{\"hello\" : null, \"world\" : [null, null, null]}";
+    let chars = &mut input.chars();
 
-    let chars = &mut data.chars();
-    let parsed = branflakes::branflakes(chars);
-    println!("Output: {:?}", parsed.is_ok());
-    println!("Remainder: {:?}", chars.as_str());
-
-    let chars = &mut data.chars();
-    let validate = branflakes::branflakes_validate(chars);
-    println!("Validate: {:?}", validate.is_ok());
-    println!("Remainder: {:?}", chars.as_str());
+    let result = json::json(chars);
+    println!("{:?}", result);
+    println!("{:?}", chars);
 }

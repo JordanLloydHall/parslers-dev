@@ -7,8 +7,7 @@ edition = "2021"
 [build-dependencies]
 parslers-lib = { path = "../parslers-lib" }
 parslers-macro = { path = "../parslers-macro" }
-parslers-branflakes = { path = "../parslers-branflakes" }
+parslers-json = { path = "../parslers-json" }
 
 [dependencies]
-parslers-branflakes = { path = "../parslers-branflakes" }
-
+parslers-json = { path = "../parslers-json" }
