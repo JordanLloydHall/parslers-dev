@@ -31,67 +31,42 @@ pub fn option<A>(a: A) -> Option<A> {
     Some(a)
 }
 
-#[reflect]
-fn zip(a: String) -> Box<dyn FnOnce(parslers_json::Json) -> (String, parslers_json::Json)> {
-    Box::new(move |b| (a, b))
-}
+// fn separated_list<P>(
+//     open_delim: char,
+//     p: P,
+//     sep: char,
+//     close_delim: char,
+// ) -> impl Parsler<Output = Vec<P::Output>> + Clone
+// where
+//     P: Parsler + Clone + 'static,
+//     P::Output: Reflect + Clone + 'static,
+// {
+// }
 
-#[reflect]
-fn json_array(a: Vec<parslers_json::Json>) -> parslers_json::Json {
-    parslers_json::Json::Array(a)
-}
-
-#[reflect]
-fn json_object(a: std::collections::HashMap<String, parslers_json::Json>) -> parslers_json::Json {
-    parslers_json::Json::Object(a)
-}
-
-fn separated_list<P>(p: P, sep: char) -> impl Parsler<Output = Vec<P::Output>> + Clone
-where
-    P: Parsler + Clone + 'static,
-    P::Output: Reflect + Clone + 'static,
-{
-    many(p.clone().before(opt(ws(match_char(',')))))
-        .map(append)
-        .ap(p.map(option).or(pure(None)))
-}
-
-fn array() -> impl Parsler<Output = parslers_json::Json> + Clone {
+fn array_type_one() -> impl Parsler<Output = Vec<char>> + Clone {
     ws(match_char('['))
-        .then(many(json().before(opt(ws(match_char(','))))).map(append))
-        .ap(json().map(option).or(pure(None)))
+        .then(
+            many(ws(match_char('a')).before(ws(match_char(','))).attempt())
+                .map(append)
+                .ap(ws(match_char('a')).map(option).or(pure(None))),
+        )
         .before(ws(match_char(']')))
-        .map(json_array)
 }
 
-fn object() -> impl Parsler<Output = parslers_json::Json> + Clone {
+fn array_type_two() -> impl Parsler<Output = Vec<char>> + Clone {
     ws(match_char('{'))
-        .then(many_map((object_item()).before(opt(ws(match_char(','))))).map(insert_opt))
-        .ap(object_item().map(option).or(pure(None)))
+        .then(
+            many(ws(match_char('b')).before(ws(match_char(';'))).attempt())
+                .map(append)
+                .ap(ws(match_char('b')).map(option).or(pure(None))),
+        )
         .before(ws(match_char('}')))
-        .map(json_object)
-}
-
-fn object_item() -> impl Parsler<Output = (String, parslers_json::Json)> + Clone {
-    string().before(ws(match_char(':'))).map(zip).ap(json())
-}
-
-fn json() -> impl Parsler<Output = parslers_json::Json> + Clone {
-    let null = ws(tag("null")).then(pure(parslers_json::Json::Null));
-
-    name("json", || null.or(array()).or(object()))
-}
-
-fn string() -> impl Parsler<Output = String> + Clone {
-    match_char('\"')
-        .then(Recognise(many(not('\"'))))
-        .before(ws(match_char('\"')))
 }
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
-    Builder::new("json", json())
+    Builder::new("arrays", array_type_one().or(array_type_two()))
         .reduce()
         .usage_analysis()
-        .build(&format!("{out_dir}/json.rs"));
+        .build(&format!("{out_dir}/arrays.rs"));
 }

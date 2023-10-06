@@ -11,3 +11,4 @@ parslers-json = { path = "../parslers-json" }
 
 [dependencies]
 parslers-json = { path = "../parslers-json" }
+parslers-macro = { path = "../parslers-macro" }
